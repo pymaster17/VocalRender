@@ -277,11 +277,6 @@ def _generate_impl(
     return out_path, gr.Markdown(info), svs_prompt
 
 
-# Advanced/raw score endpoint. The word-by-word editor defines its own decorated
-# endpoint inside gr.render because its component count is dynamic.
-generate = spaces.GPU(duration=60)(_generate_impl)
-
-
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
@@ -462,37 +457,15 @@ def _preset_to_rows(preset: Dict) -> List[Dict]:
     return rows
 
 
-@spaces.GPU(duration=60)
-def generate_random_preset(
-    voice_preset,
-    prompt_audio,
-    cfg_value,
-    inference_timesteps,
-    temperature,
-    max_len,
-):
-    """Choose a dataset preset, load it into the editor, and generate immediately."""
+def load_random_preset():
+    """Choose a dataset preset and load it for user editing without using a GPU."""
     preset = random.choice(SCORE_PRESETS)
     lyrics = "|".join(preset["words"])
     rows = _preset_to_rows(preset)
-    audio, status, svs_prompt = _generate_impl(
-        voice_preset,
-        prompt_audio,
-        lyrics,
-        ",".join(map(str, preset["pitches"])),
-        ",".join(preset["notes"]),
-        ",".join(map(str, preset["pitch2word"])),
-        preset["bpm"],
-        cfg_value,
-        inference_timesteps,
-        temperature,
-        max_len,
+    message = gr.Markdown(
+        "🎲 **Preset loaded.** Adjust any pitch, duration, melisma note, or tempo before generating."
     )
-    source = f"🎲 **{preset['title']}**"
-    if preset.get("artist"):
-        source += f" — {preset['artist']}"
-    source += f" · preset `{preset['id']}`"
-    return lyrics, rows, preset["bpm"], gr.Markdown(source), audio, status, svs_prompt
+    return lyrics, rows, preset["bpm"], message
 
 
 def _sync_score_rows(rows: List[Dict], pitches, durations) -> List[Dict]:
@@ -547,7 +520,7 @@ with gr.Blocks(elem_id="col-container") as demo:
             "3. **Melody and rhythm:** press **Create word-by-word score**, then set pitch and duration. "
             "Use **+ Melisma note** when one lyric unit spans multiple notes.\n"
             "4. **Generate:** choose the tempo and press **Generate Singing**. Or press "
-            "**🎲 Random preset & generate** to load a ready-made score and generate it immediately. "
+            "**🎲 Random score preset** to load a ready-made score, adjust it freely, then generate. "
             "The first run may wait in a shared GPU queue.\n\n"
             "> This checkpoint supports Chinese lyrics only. Other languages are rejected before inference. Only upload a voice "
             "recording that you own or have permission to use."
@@ -585,7 +558,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 scale=5,
             )
             random_preset_btn = gr.Button(
-                "🎲 Random preset & generate",
+                "🎲 Random score preset",
                 variant="secondary",
                 scale=1,
             )
@@ -767,54 +740,18 @@ with gr.Blocks(elem_id="col-container") as demo:
             outputs=[score_rows, preset_info],
         )
 
-        with gr.Accordion("Advanced raw score input", open=False):
-            gr.Markdown(
-                "Use this mode for custom rests or direct editing of VocalRender's native score format. "
-                "The visual editor above now supports melismas."
-            )
-            pitches_str = gr.Textbox(
-                label="MIDI pitches",
-                value="65,64,64,65,67,65,67,69,63",
-            )
-            notes_str = gr.Textbox(
-                label="Note duration tokens",
-                value="<NOTE_8>,<NOTE_32>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_8>",
-            )
-            pitch2word_str = gr.Textbox(
-                label="Pitch-to-word mapping",
-                value="0,1,2,2,2,3,4,5,6",
-            )
-            advanced_run_btn = gr.Button("Generate from raw score")
-
         status_out = gr.Markdown("")
         prompt_out = gr.Textbox(label="Generated SVS prompt (debug)", visible=False)
         audio_out = gr.Audio(label="Synthesized Singing", type="filepath", format="wav")
 
-    advanced_run_btn.click(
-        fn=generate,
-        inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm,
-                cfg_value, inference_timesteps, temperature, max_len],
-        outputs=[audio_out, status_out, prompt_out],
-    )
-
     random_preset_btn.click(
-        fn=generate_random_preset,
-        inputs=[
-            voice_preset,
-            prompt_audio,
-            cfg_value,
-            inference_timesteps,
-            temperature,
-            max_len,
-        ],
+        fn=load_random_preset,
+        inputs=None,
         outputs=[
             lyrics_str,
             score_rows,
             bpm,
             preset_info,
-            audio_out,
-            status_out,
-            prompt_out,
         ],
     )
 
