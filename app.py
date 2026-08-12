@@ -287,7 +287,13 @@ generate = spaces.GPU(duration=60)(_generate_impl)
 CSS = """
 #col-container { max-width: 1100px; margin: 0 auto; }
 .dark .gradio-container { color: var(--body-text-color); }
-.note-symbols { font-family: "Noto Music", "Bravura", "Segoe UI Symbol", serif; font-size: 1.3rem; }
+.note-legend { display: flex; flex-wrap: wrap; gap: .45rem; margin: .4rem 0 1rem; }
+.note-choice { display: flex; min-width: 74px; flex-direction: column; align-items: center; padding: .3rem; border: 1px solid #ddd; border-radius: .45rem; }
+.note-choice svg { width: 42px; height: 42px; color: currentColor; }
+.note-choice small { font-size: .68rem; text-align: center; }
+.selected-note { display: flex; align-items: center; gap: .5rem; min-height: 66px; padding: .4rem .6rem; border: 1px solid #ddd; border-radius: .5rem; }
+.selected-note svg { width: 42px; height: 42px; color: currentColor; flex: none; }
+.dark .note-choice, .dark .selected-note { border-color: #444; }
 """
 
 NOTE_OPTIONS = [
@@ -297,22 +303,57 @@ NOTE_OPTIONS = [
 
 # Longest to shortest, so the duration editor behaves naturally as a slider.
 NOTE_DURATION_OPTIONS = [
-    ("𝅝· Dotted whole", "<NOTE_DOT_1>"),
-    ("𝅝 Whole", "<NOTE_1>"),
-    ("𝅗𝅥· Dotted half", "<NOTE_DOT_2>"),
-    ("𝅗𝅥 Half", "<NOTE_2>"),
-    ("𝅘𝅥· Dotted quarter", "<NOTE_DOT_4>"),
-    ("𝅘𝅥 Quarter", "<NOTE_4>"),
-    ("𝅘𝅥𝅮· Dotted eighth", "<NOTE_DOT_8>"),
-    ("𝅘𝅥𝅮 Eighth", "<NOTE_8>"),
-    ("𝅘𝅥𝅯· Dotted sixteenth", "<NOTE_DOT_16>"),
-    ("𝅘𝅥𝅯 Sixteenth", "<NOTE_16>"),
-    ("𝅘𝅥𝅰· Dotted thirty-second", "<NOTE_DOT_32>"),
-    ("𝅘𝅥𝅰 Thirty-second", "<NOTE_32>"),
+    ("Dotted whole", "<NOTE_DOT_1>"),
+    ("Whole", "<NOTE_1>"),
+    ("Dotted half", "<NOTE_DOT_2>"),
+    ("Half", "<NOTE_2>"),
+    ("Dotted quarter", "<NOTE_DOT_4>"),
+    ("Quarter", "<NOTE_4>"),
+    ("Dotted eighth", "<NOTE_DOT_8>"),
+    ("Eighth", "<NOTE_8>"),
+    ("Dotted sixteenth", "<NOTE_DOT_16>"),
+    ("Sixteenth", "<NOTE_16>"),
+    ("Dotted thirty-second", "<NOTE_DOT_32>"),
+    ("Thirty-second", "<NOTE_32>"),
 ]
 NOTE_TO_DURATION_INDEX = {
     token: index for index, (_, token) in enumerate(NOTE_DURATION_OPTIONS)
 }
+
+
+def _note_icon_svg(token: str) -> str:
+    """Render a font-independent music-note icon as inline SVG."""
+    dotted = "_DOT_" in token
+    denominator = int(re.search(r"(\d+)>$", token).group(1))
+    hollow = denominator in (1, 2)
+    head = (
+        '<ellipse cx="24" cy="34" rx="11" ry="6.5" transform="rotate(-18 24 34)" '
+        f'fill="{"none" if hollow else "currentColor"}" stroke="currentColor" stroke-width="3"/>'
+    )
+    stem = "" if denominator == 1 else '<path d="M34 32V7" fill="none" stroke="currentColor" stroke-width="3"/>'
+    flag_count = {8: 1, 16: 2, 32: 3}.get(denominator, 0)
+    flags = "".join(
+        f'<path d="M34 {7 + offset * 7} C49 {10 + offset * 7}, 48 {20 + offset * 7}, 38 {23 + offset * 7}" '
+        'fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'
+        for offset in range(flag_count)
+    )
+    dot = '<circle cx="43" cy="34" r="2.6" fill="currentColor"/>' if dotted else ""
+    return f'<svg viewBox="0 0 58 48" aria-hidden="true">{head}{stem}{flags}{dot}</svg>'
+
+
+def _duration_html(index: int, compact: bool = False) -> str:
+    label, token = NOTE_DURATION_OPTIONS[int(index)]
+    icon = _note_icon_svg(token)
+    if compact:
+        return f'<div class="selected-note">{icon}<span>{label}</span></div>'
+    return f'<div class="note-choice"><strong>{index}</strong>{icon}<small>{label}</small></div>'
+
+
+NOTE_DURATION_LEGEND_HTML = (
+    '<div class="note-legend">'
+    + "".join(_duration_html(index) for index in range(len(NOTE_DURATION_OPTIONS)))
+    + "</div>"
+)
 
 VOICE_PRESETS = {
     "Included voice 1": "assets/2003000081.wav",
@@ -539,12 +580,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 "Type a MIDI pitch directly (60 = middle C/C4; 0 = rest). "
                 "Choose note length with the duration slider."
             )
-            gr.Markdown(
-                "**0** 𝅝·　 **1** 𝅝　 **2** 𝅗𝅥·　 **3** 𝅗𝅥　 "
-                "**4** 𝅘𝅥·　 **5** 𝅘𝅥　 **6** 𝅘𝅥𝅮·　 **7** 𝅘𝅥𝅮　 "
-                "**8** 𝅘𝅥𝅯·　 **9** 𝅘𝅥𝅯　 **10** 𝅘𝅥𝅰·　 **11** 𝅘𝅥𝅰",
-                elem_classes="note-symbols",
-            )
+            gr.HTML(NOTE_DURATION_LEGEND_HTML)
             pitch_controls = []
             duration_controls = []
             add_buttons = []
@@ -583,15 +619,13 @@ with gr.Blocks(elem_id="col-container") as demo:
                         scale=3,
                         key=f"score-duration-{uid}",
                     )
-                    duration_name = gr.Textbox(
-                        value=NOTE_DURATION_OPTIONS[row["duration_index"]][0],
-                        label="Selected duration",
-                        interactive=False,
+                    duration_name = gr.HTML(
+                        value=_duration_html(row["duration_index"], compact=True),
                         scale=2,
                         key=f"score-duration-name-{uid}",
                     )
                     duration.change(
-                        lambda value: NOTE_DURATION_OPTIONS[int(round(value))][0],
+                        lambda value: _duration_html(int(round(value)), compact=True),
                         inputs=duration,
                         outputs=duration_name,
                         key=f"show-duration-{uid}",
