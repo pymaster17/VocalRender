@@ -34,8 +34,12 @@ lyric unit. If a syllable spans multiple notes, press **+ Melisma note** and edi
 independently. You do not need to understand the model architecture or write code. Other
 languages are rejected because the released checkpoint was trained only on Chinese lyrics.
 
-An advanced raw-score editor remains available for melismas, where one syllable is sung across
-multiple notes, and for direct use of VocalRender's native input format.
+An advanced raw-score editor remains available for custom rests and direct use of VocalRender's
+native input format; the visual editor already supports melismas.
+
+The **🎲 Random preset & generate** button chooses one of 30 ready-to-use score segments sampled
+from the processed CloudTest data, loads its lyrics, complete melisma-aware score and BPM into the
+editor, and starts generation using the currently selected voice reference.
 
 Only upload voice recordings that you own or have permission to use.
 

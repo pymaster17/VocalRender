@@ -6,6 +6,7 @@ import sys
 import json
 import re
 import base64
+import random
 import time
 import tempfile
 from pathlib import Path
@@ -369,39 +370,9 @@ VOICE_PRESETS = {
     "Upload my own voice": None,
 }
 
-# Predefined examples from the official repo
-EXAMPLES = [
-    # Demo example from inference_input.json
-    {
-        "lyrics": "我|的|孤|独|是|真|的",
-        "pitches": "65,64,64,65,67,65,67,69,63",
-        "notes": "<NOTE_8>,<NOTE_32>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_8>",
-        "pitch2word": "0,1,2,2,2,3,4,5,6",
-        "bpm": 64,
-        "prompt_audio": "assets/2003000081.wav",
-        "voice_preset": "Included voice 1",
-    },
-    # Opencpop demo entry 2003000087 (prompt audio 2003000081)
-    {
-        "lyrics": "假|如|迷|路|了|一|SP|定|SP|把|思|念|装|进|漂|流|瓶|SP",
-        "pitches": "69,70,69,70,69,62,0,62,60,58,0,58,69,70,69,70,69,62,62,60,0",
-        "notes": "<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_32>,<NOTE_16>,<NOTE_DOT_32>,<NOTE_DOT_8>,<NOTE_DOT_16>,<NOTE_32>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_DOT_32>,<NOTE_DOT_16>,<NOTE_16>,<NOTE_DOT_16>,<NOTE_8>,<NOTE_16>",
-        "pitch2word": "0,1,2,3,4,5,6,7,7,7,8,9,10,11,12,13,14,15,16,16,17",
-        "bpm": 58,
-        "prompt_audio": "assets/2003000081.wav",
-        "voice_preset": "Included voice 1",
-    },
-    # Opencpop demo entry 2017000646 (prompt audio 2017000644)
-    {
-        "lyrics": "在|一|瞬|间|温|热|了|SP|双|眼",
-        "pitches": "58,61,63,61,63,68,70,68,0,61,63,61,63,63",
-        "notes": "<NOTE_DOT_8>,<NOTE_DOT_16>,<NOTE_4>,<NOTE_DOT_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_DOT_8>,<NOTE_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_DOT_16>,<NOTE_DOT_2>",
-        "pitch2word": "0,1,2,3,4,5,5,6,7,8,8,8,8,9",
-        "bpm": 70,
-        "prompt_audio": "assets/2017000644.wav",
-        "voice_preset": "Included voice 2",
-    },
-]
+SCORE_PRESETS = json.loads(
+    (Path(__file__).parent / "assets/score_presets.json").read_text(encoding="utf-8")
+)
 
 MAX_SCORE_WORDS = 64
 CHINESE_PUNCTUATION = "，。！？、；：‘’“”（）《》〈〉【】…—·,.!?;:()[]-"
@@ -466,12 +437,16 @@ def _score_rows_from_lyrics(lyrics: str) -> List[Dict]:
     ]
 
 
-def _easy_rows_from_example(example: Dict) -> List[Dict]:
-    """Build editable rows while preserving every melisma note in an example."""
-    words = _split_lyrics(example["lyrics"])
-    pitches = [int(value) for value in example["pitches"].split(",")]
-    notes = example["notes"].split(",")
-    mapping = [int(value) for value in example["pitch2word"].split(",")]
+def _create_manual_score(lyrics: str):
+    return _score_rows_from_lyrics(lyrics), gr.Markdown("")
+
+
+def _preset_to_rows(preset: Dict) -> List[Dict]:
+    """Build editable rows while preserving every melisma note in a preset."""
+    words = preset["words"]
+    pitches = preset["pitches"]
+    notes = preset["notes"]
+    mapping = preset["pitch2word"]
     rows = []
     occurrence = {}
     for note_index, word_index in enumerate(mapping):
@@ -485,6 +460,39 @@ def _easy_rows_from_example(example: Dict) -> List[Dict]:
             "duration_index": NOTE_TO_DURATION_INDEX[token],
         })
     return rows
+
+
+@spaces.GPU(duration=60)
+def generate_random_preset(
+    voice_preset,
+    prompt_audio,
+    cfg_value,
+    inference_timesteps,
+    temperature,
+    max_len,
+):
+    """Choose a dataset preset, load it into the editor, and generate immediately."""
+    preset = random.choice(SCORE_PRESETS)
+    lyrics = "|".join(preset["words"])
+    rows = _preset_to_rows(preset)
+    audio, status, svs_prompt = _generate_impl(
+        voice_preset,
+        prompt_audio,
+        lyrics,
+        ",".join(map(str, preset["pitches"])),
+        ",".join(preset["notes"]),
+        ",".join(map(str, preset["pitch2word"])),
+        preset["bpm"],
+        cfg_value,
+        inference_timesteps,
+        temperature,
+        max_len,
+    )
+    source = f"🎲 **{preset['title']}**"
+    if preset.get("artist"):
+        source += f" — {preset['artist']}"
+    source += f" · preset `{preset['id']}`"
+    return lyrics, rows, preset["bpm"], gr.Markdown(source), audio, status, svs_prompt
 
 
 def _sync_score_rows(rows: List[Dict], pitches, durations) -> List[Dict]:
@@ -538,7 +546,9 @@ with gr.Blocks(elem_id="col-container") as demo:
             "you can also use `|` to control the split. Other languages are not supported by this checkpoint.\n"
             "3. **Melody and rhythm:** press **Create word-by-word score**, then set pitch and duration. "
             "Use **+ Melisma note** when one lyric unit spans multiple notes.\n"
-            "4. **Generate:** choose the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.\n\n"
+            "4. **Generate:** choose the tempo and press **Generate Singing**. Or press "
+            "**🎲 Random preset & generate** to load a ready-made score and generate it immediately. "
+            "The first run may wait in a shared GPU queue.\n\n"
             "> This checkpoint supports Chinese lyrics only. Other languages are rejected before inference. Only upload a voice "
             "recording that you own or have permission to use."
         )
@@ -572,7 +582,15 @@ with gr.Blocks(elem_id="col-container") as demo:
                 label="2. Enter lyrics",
                 value="我的孤独是真的",
                 info="Type normally, or use | to choose the exact split. Write SP for a rest or breath.",
+                scale=5,
             )
+            random_preset_btn = gr.Button(
+                "🎲 Random preset & generate",
+                variant="secondary",
+                scale=1,
+            )
+
+        preset_info = gr.Markdown("")
 
         split_btn = gr.Button("Create word-by-word score")
         score_rows = gr.State([])
@@ -738,8 +756,16 @@ with gr.Blocks(elem_id="col-container") as demo:
 
         easy_run_btn = gr.Button("Generate Singing", variant="primary")
 
-        split_btn.click(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
-        lyrics_str.submit(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
+        split_btn.click(
+            _create_manual_score,
+            inputs=lyrics_str,
+            outputs=[score_rows, preset_info],
+        )
+        lyrics_str.submit(
+            _create_manual_score,
+            inputs=lyrics_str,
+            outputs=[score_rows, preset_info],
+        )
 
         with gr.Accordion("Advanced raw score input", open=False):
             gr.Markdown(
@@ -771,13 +797,25 @@ with gr.Blocks(elem_id="col-container") as demo:
         outputs=[audio_out, status_out, prompt_out],
     )
 
-    with gr.Accordion("Advanced ready-to-use score examples", open=False):
-        gr.Examples(
-            examples=[
-                [e["voice_preset"], None, e["lyrics"], e["pitches"], e["notes"], e["pitch2word"], e["bpm"]]
-                for e in EXAMPLES
-            ],
-            inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm],
-        )
+    random_preset_btn.click(
+        fn=generate_random_preset,
+        inputs=[
+            voice_preset,
+            prompt_audio,
+            cfg_value,
+            inference_timesteps,
+            temperature,
+            max_len,
+        ],
+        outputs=[
+            lyrics_str,
+            score_rows,
+            bpm,
+            preset_info,
+            audio_out,
+            status_out,
+            prompt_out,
+        ],
+    )
 
 demo.launch(mcp_server=True, theme=gr.themes.Citrus(), css=CSS)
