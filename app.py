@@ -287,6 +287,7 @@ generate = spaces.GPU(duration=60)(_generate_impl)
 CSS = """
 #col-container { max-width: 1100px; margin: 0 auto; }
 .dark .gradio-container { color: var(--body-text-color); }
+.note-symbols { font-family: "Noto Music", "Bravura", "Segoe UI Symbol", serif; font-size: 1.3rem; }
 """
 
 NOTE_OPTIONS = [
@@ -296,18 +297,18 @@ NOTE_OPTIONS = [
 
 # Longest to shortest, so the duration editor behaves naturally as a slider.
 NOTE_DURATION_OPTIONS = [
-    ("Dotted whole", "<NOTE_DOT_1>"),
-    ("Whole", "<NOTE_1>"),
-    ("Dotted half", "<NOTE_DOT_2>"),
-    ("Half", "<NOTE_2>"),
-    ("Dotted quarter", "<NOTE_DOT_4>"),
-    ("Quarter", "<NOTE_4>"),
-    ("Dotted eighth", "<NOTE_DOT_8>"),
-    ("Eighth", "<NOTE_8>"),
-    ("Dotted sixteenth", "<NOTE_DOT_16>"),
-    ("Sixteenth", "<NOTE_16>"),
-    ("Dotted thirty-second", "<NOTE_DOT_32>"),
-    ("Thirty-second", "<NOTE_32>"),
+    ("𝅝· Dotted whole", "<NOTE_DOT_1>"),
+    ("𝅝 Whole", "<NOTE_1>"),
+    ("𝅗𝅥· Dotted half", "<NOTE_DOT_2>"),
+    ("𝅗𝅥 Half", "<NOTE_2>"),
+    ("𝅘𝅥· Dotted quarter", "<NOTE_DOT_4>"),
+    ("𝅘𝅥 Quarter", "<NOTE_4>"),
+    ("𝅘𝅥𝅮· Dotted eighth", "<NOTE_DOT_8>"),
+    ("𝅘𝅥𝅮 Eighth", "<NOTE_8>"),
+    ("𝅘𝅥𝅯· Dotted sixteenth", "<NOTE_DOT_16>"),
+    ("𝅘𝅥𝅯 Sixteenth", "<NOTE_16>"),
+    ("𝅘𝅥𝅰· Dotted thirty-second", "<NOTE_DOT_32>"),
+    ("𝅘𝅥𝅰 Thirty-second", "<NOTE_32>"),
 ]
 NOTE_TO_DURATION_INDEX = {
     token: index for index, (_, token) in enumerate(NOTE_DURATION_OPTIONS)
@@ -536,10 +537,13 @@ with gr.Blocks(elem_id="col-container") as demo:
             gr.Markdown(
                 "### 3. Set pitch and duration for each lyric unit\n"
                 "Type a MIDI pitch directly (60 = middle C/C4; 0 = rest). "
-                "The duration slider runs from **0 = dotted whole** to **11 = thirty-second**.\n\n"
-                "`0 Dotted whole` · `1 Whole` · `2 Dotted half` · `3 Half` · "
-                "`4 Dotted quarter` · `5 Quarter` · `6 Dotted eighth` · `7 Eighth` · "
-                "`8 Dotted 16th` · `9 16th` · `10 Dotted 32nd` · `11 32nd`"
+                "Choose note length with the duration slider."
+            )
+            gr.Markdown(
+                "**0** 𝅝·　 **1** 𝅝　 **2** 𝅗𝅥·　 **3** 𝅗𝅥　 "
+                "**4** 𝅘𝅥·　 **5** 𝅘𝅥　 **6** 𝅘𝅥𝅮·　 **7** 𝅘𝅥𝅮　 "
+                "**8** 𝅘𝅥𝅯·　 **9** 𝅘𝅥𝅯　 **10** 𝅘𝅥𝅰·　 **11** 𝅘𝅥𝅰",
+                elem_classes="note-symbols",
             )
             pitch_controls = []
             duration_controls = []
