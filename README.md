@@ -39,7 +39,8 @@ Musicians can also open **Import ABC notation or MusicXML**. ABC notation can be
 or uploaded as `.abc`/`.txt`; MusicXML can be uploaded as `.musicxml`, `.xml`, or compressed `.mxl`.
 After parsing, choose the work or vocal part, lyric line, and a contiguous measure range, then load
 it into the same editable score. The importer prefers a lyric-bearing monophonic part and embedded
-lyrics, while still allowing either choice to be changed.
+lyrics, while still allowing either choice to be changed. It preselects a compatible range that
+fits the editor limits, so importing a full song does not immediately fail on length.
 
 VocalRender's score vocabulary is monophonic and intentionally compact. Exact whole through
 thirty-second note values and their dotted forms are preserved. Other values are quantized only
@@ -52,8 +53,10 @@ the range has been flattened to one tempo.
 MusicXML lyric extensions, ties, and ABC `w:` underscore (`_`) melismas are converted to
 VocalRender's pitch-to-word alignment. If the selected part has no embedded lyrics, enter Chinese
 lyrics in the normal textbox before loading the range; the number of lyric units must exactly
-match the pitched note attacks. ABC import is powered by `music21`, which implements ABC 1.6 and
-much, but not all, of ABC 2.1.
+match the pitched note attacks. ABC accompaniment labels such as `"C"` are ignored. Uppercase
+`W:` lines are unaligned page text (unlike lowercase `w:`), so the demo prompts you to paste the
+matching Chinese passage into the lyrics textbox. ABC import is powered by `music21`, which
+implements ABC 1.6 and much, but not all, of ABC 2.1.
 
 The **🎲 Random score preset** button chooses one of 100 ready-to-use score segments sampled from
 the processed CloudTest data and loads its lyrics, complete melisma-aware score and BPM into the

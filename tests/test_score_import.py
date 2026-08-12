@@ -7,6 +7,7 @@ from vocalrender.utils.score_import import (
     ScoreImportError,
     convert_selection,
     parse_score,
+    recommended_measure_range,
 )
 
 
@@ -146,6 +147,56 @@ def test_chord_is_rejected_with_measure_location():
     parsed = parse_score(abc_text="X:1\nM:1/4\nL:1/4\nK:C\n[CEG]|\nw: 我")
     with pytest.raises(ScoreImportError, match="Chord at measure"):
         _selection(parsed)
+
+
+def test_abc_chord_symbols_are_ignored_but_sounding_chords_are_rejected():
+    parsed = parse_score(abc_text='X:1\nM:2/4\nL:1/4\nK:C\n"C"C "G7"D|')
+    part = parsed["parts"][0]
+    assert [event["kind"] for event in part["events"]] == ["note", "note"]
+    assert part["stats"]["invalid_events"] == 0
+    assert _selection(parsed, verse="__external__", lyrics="你|好")["lyrics"] == "你|好"
+
+    sounding_chord = parse_score(abc_text="X:1\nM:1/4\nL:1/4\nK:C\n[CEG]|")
+    with pytest.raises(ScoreImportError, match="Chord at measure"):
+        _selection(sounding_chord, verse="__external__", lyrics="你")
+
+
+def test_uppercase_abc_words_are_not_treated_as_note_aligned_lyrics():
+    parsed = parse_score(abc_text="X:1\nM:2/4\nL:1/4\nK:C\nC D|\nW: 你 好")
+    assert parsed["parts"][0]["verses"] == []
+    assert any("W: block lyrics" in warning for warning in parsed["warnings"])
+    assert _selection(parsed, verse="__external__", lyrics="你|好")["lyrics"] == "你|好"
+
+
+def test_musicxml_work_title_is_used_in_part_label(tmp_path: Path):
+    score_path = tmp_path / "titled.musicxml"
+    score_path.write_text(
+        MUSICXML_SCORE.replace(
+            '<score-partwise version="4.0">',
+            '<score-partwise version="4.0"><work><work-title>茉莉花</work-title></work>',
+        ),
+        encoding="utf-8",
+    )
+    parsed = parse_score(file_path=str(score_path))
+    assert parsed["parts"][0]["label"].startswith("茉莉花 —")
+
+
+def test_recommended_range_skips_chords_and_respects_editor_limit():
+    notes = " ".join("C" for _ in range(40))
+    parsed = parse_score(
+        abc_text=f"X:1\nM:none\nL:1/4\nK:C\n[CEG]|{notes}|{notes}|"
+    )
+    part = parsed["parts"][0]
+    start, end = recommended_measure_range(part)
+    selected = [
+        event for event in part["events"]
+        if part["measures"].index(start)
+        <= part["measures"].index(event["measure"])
+        <= part["measures"].index(end)
+    ]
+    assert start != part["measures"][0]
+    assert len(selected) <= 64
+    assert all(event["kind"] != "chord" for event in selected)
 
 
 def test_overlap_and_unsafe_quantization_are_rejected():

@@ -27,7 +27,7 @@ with warnings.catch_warnings():
     )
     defusedxml.defuse_stdlib()
 
-from music21 import chord, converter, note, stream, tempo  # noqa: E402
+from music21 import chord, converter, harmony, note, stream, tempo  # noqa: E402
 
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -148,10 +148,13 @@ def _extract_abc_part_verses(source: str) -> List[List[List[str]]]:
             if current_voice not in voices:
                 voices[current_voice] = []
                 voice_order.append(current_voice)
-        if re.match(r"^\s*w\s*:", lines[index], flags=re.IGNORECASE):
+        # ABC distinguishes lower-case w: (note-aligned lyrics) from upper-case
+        # W: (free-form words printed after the tune).  Treating W: as aligned
+        # silently assigns syllables to the wrong notes in many archive files.
+        if re.match(r"^\s*w\s*:", lines[index]):
             run: List[str] = []
             while index < len(lines):
-                match = re.match(r"^\s*w\s*:\s*(.*)$", lines[index], flags=re.IGNORECASE)
+                match = re.match(r"^\s*w\s*:\s*(.*)$", lines[index])
                 if not match:
                     break
                 run.append(match.group(1))
@@ -289,7 +292,13 @@ def _extract_part(
     abc_verses: Sequence[Sequence[str]],
     abc_part_label: Optional[str] = None,
 ) -> Dict[str, Any]:
-    elements = list(part.recurse().notesAndRests)
+    # music21 represents ABC guitar-chord annotations (for example "C") as
+    # zero-duration ChordSymbol objects, and ChordSymbol subclasses Chord.
+    # They describe accompaniment harmony rather than notes to be sung.
+    elements = [
+        element for element in part.recurse().notesAndRests
+        if not isinstance(element, harmony.ChordSymbol)
+    ]
     elements.sort(key=lambda item: (_absolute_offset(item, part), item.classSortOrder))
     events: List[Dict[str, Any]] = []
     verse_ids = set()
@@ -404,7 +413,14 @@ def parse_score(*, file_path: Optional[str] = None, abc_text: str = "") -> Dict[
     parts: List[Dict[str, Any]] = []
     for work_index, work in enumerate(_score_list(parsed)):
         metadata = getattr(work, "metadata", None)
-        title = getattr(metadata, "title", None) or f"Work {work_index + 1}"
+        # MusicXML commonly maps <work-title> to bestTitle/movementName rather
+        # than Metadata.title, notably in files exported by MuseScore/music21.
+        title = (
+            getattr(metadata, "bestTitle", None)
+            or getattr(metadata, "title", None)
+            or getattr(metadata, "movementName", None)
+            or f"Work {work_index + 1}"
+        )
         for part_index, part in enumerate(_part_list(work)):
             abc_verses: Sequence[Sequence[str]] = []
             if work_index < len(abc_work_verses):
@@ -438,13 +454,21 @@ def parse_score(*, file_path: Optional[str] = None, abc_text: str = "") -> Dict[
         ),
         reverse=True,
     )
+    parse_warnings = (
+        ["Both an upload and pasted ABC were provided; the uploaded file was used."]
+        if file_path and abc_text else []
+    )
+    if input_format == "abc" and re.search(r"^\s*W\s*:", abc_source, flags=re.MULTILINE):
+        parse_warnings.append(
+            "This ABC contains W: block lyrics, which are not aligned to notes. "
+            "Choose ‘Use lyrics textbox’ and paste the Chinese words for your selected measures."
+        )
     return {
         "format": input_format,
         "source_id": hashlib.sha256(source_bytes).hexdigest()[:12],
         "parts": parts,
         "default_part": ranked[0]["key"],
-        "warnings": (["Both an upload and pasted ABC were provided; the uploaded file was used."]
-                     if file_path and abc_text else []),
+        "warnings": parse_warnings,
     }
 
 
@@ -458,10 +482,70 @@ def get_part(parsed: Dict[str, Any], part_key: str) -> Dict[str, Any]:
 def part_summary(part: Dict[str, Any]) -> str:
     stats = part["stats"]
     lyric_status = f"{len(part['verses'])} embedded lyric line(s)" if part["verses"] else "no embedded lyrics"
+    start_measure, end_measure = recommended_measure_range(part)
+    recommendation = (
+        f" A model-ready range is preselected: measures {start_measure}–{end_measure}."
+        if start_measure is not None else
+        " No directly compatible monophonic measure was found; choose a melody-only part or simplify the score."
+    )
+    compatibility = []
+    if stats["invalid_events"]:
+        compatibility.append(f"{stats['invalid_events']} chord/grace event(s)")
+    if stats["overlaps"]:
+        compatibility.append(f"{stats['overlaps']} overlap(s)")
+    compatibility_text = (
+        " Unsupported events outside the selected range are okay. Detected: "
+        + ", ".join(compatibility) + "."
+        if compatibility else ""
+    )
     return (
         f"**{part['label']}** — {stats['events']} events, {len(part['measures'])} measures, "
-        f"{lyric_status}. Select a measure range, then load it into the editor."
+        f"{lyric_status}.{recommendation}{compatibility_text}"
     )
+
+
+def _event_has_supported_duration(event: Dict[str, Any]) -> bool:
+    value = event["quarter_length"]
+    if value <= 0:
+        return False
+    target, _ = min(NOTE_QUARTER_LENGTHS, key=lambda item: (abs(item[0] - value), item[0]))
+    return abs(target - value) / value <= 0.125 + 1e-9
+
+
+def recommended_measure_range(part: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """Return the longest early, monophonic range that fits model limits.
+
+    The lyric count cannot be known before external lyrics are supplied, so one
+    event is conservatively budgeted as one lyric/rest unit.  Users may extend
+    the range when embedded melismas reduce the real unit count.
+    """
+    measures = part.get("measures", [])
+    events_by_measure = {
+        measure: [event for event in part["events"] if event["measure"] == measure]
+        for measure in measures
+    }
+    best: Optional[Tuple[int, int, int]] = None
+    event_limit = min(MAX_SCORE_EVENTS, MAX_SCORE_WORDS)
+    for start_index in range(len(measures)):
+        selected: List[Dict[str, Any]] = []
+        for end_index in range(start_index, len(measures)):
+            measure_events = events_by_measure[measures[end_index]]
+            if (
+                not measure_events
+                or any(event["kind"] == "chord" or not _event_has_supported_duration(event)
+                       for event in measure_events)
+            ):
+                break
+            candidate = [*selected, *measure_events]
+            if len(candidate) > event_limit or _find_overlaps(candidate):
+                break
+            selected = candidate
+            score = len(selected)
+            if best is None or score > best[2]:
+                best = (start_index, end_index, score)
+    if best is None:
+        return None, None
+    return measures[best[0]], measures[best[1]]
 
 
 def _selected_events(part: Dict[str, Any], start_measure: str, end_measure: str) -> List[Dict[str, Any]]:

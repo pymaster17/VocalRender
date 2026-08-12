@@ -30,6 +30,7 @@ from vocalrender.utils.score_import import (
     get_part as get_imported_part,
     parse_score as parse_imported_score_data,
     part_summary as imported_part_summary,
+    recommended_measure_range,
 )
 
 MODEL_ID = "pymaster/VocalRender"
@@ -595,11 +596,19 @@ def _import_part_updates(parsed: Dict, part_key: str):
     verse_choices.append(("Use lyrics textbox", "__external__"))
     verse_value = part["verses"][0] if part["verses"] else "__external__"
     measure_choices = [(f"Measure {measure}", measure) for measure in part["measures"]]
+    recommended_start, recommended_end = recommended_measure_range(part)
+    recommended_start = recommended_start or part["measures"][0]
+    recommended_end = recommended_end or part["measures"][0]
+    summary = imported_part_summary(part)
+    if parsed.get("warnings"):
+        summary += "\n\n**Before loading**\n" + "\n".join(
+            f"- {warning}" for warning in parsed["warnings"]
+        )
     return (
         gr.Dropdown(choices=verse_choices, value=verse_value),
-        gr.Dropdown(choices=measure_choices, value=part["measures"][0]),
-        gr.Dropdown(choices=measure_choices, value=part["measures"][-1]),
-        imported_part_summary(part),
+        gr.Dropdown(choices=measure_choices, value=recommended_start),
+        gr.Dropdown(choices=measure_choices, value=recommended_end),
+        summary,
     )
 
 
@@ -721,9 +730,14 @@ with gr.Blocks(elem_id="col-container") as demo:
 
         with gr.Accordion("Import ABC notation or MusicXML", open=False):
             gr.Markdown(
-                "Paste ABC notation or upload `.abc`, `.txt`, `.musicxml`, `.xml`, or `.mxl`. "
-                "The importer selects the most likely vocal part, and you can change the part, "
-                "lyric line, and measure range before loading it into the editor."
+                "### Import a score in three steps\n"
+                "1. Paste ABC notation or upload `.abc`, `.txt`, `.musicxml`, `.xml`, or `.mxl`, then press **Parse score**.\n"
+                "2. Check the suggested vocal part, lyric line, and preselected model-ready measure range.\n"
+                "3. Press **Load selected range into editor**, review the notes, then generate.\n\n"
+                "ABC `w:` lyrics and MusicXML lyrics are aligned automatically. ABC `W:` words are only page text, "
+                "so paste the matching Chinese passage into **Enter lyrics** and choose **Use lyrics textbox**. "
+                "Accompaniment chord names such as `\"C\"` are ignored; actual simultaneous notes must be removed "
+                "or imported from a melody-only part."
             )
             with gr.Row():
                 abc_score_text = gr.Textbox(
