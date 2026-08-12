@@ -19,7 +19,7 @@ Score-native singing voice synthesis (SVS) model that generates 48 kHz singing a
 
 VocalRender turns a written vocal part into a sung audio performance. You give it:
 
-1. one of the three included example voices, or a short recording that demonstrates the desired vocal color;
+1. one of the six included GTSinger references (`Alto-1/2/3` or `Tenor-1/2/3`), or a short recording that demonstrates the desired vocal color;
 2. the lyrics, which the app splits into editable sung units;
 3. one or more MIDI pitches and note durations for each lyric unit;
 4. the tempo.
@@ -40,6 +40,9 @@ editor. It does not start inference, so every value can be adjusted before press
 Singing**. Source song and artist names are not displayed.
 
 Only upload voice recordings that you own or have permission to use.
+
+The six bundled voice references are 48 kHz mono excerpts selected from the natural-performance
+control groups of the `ZH-Alto-1` and `ZH-Tenor-1` singers in the GTSinger Chinese dataset.
 
 The music-notation icons use Steinberg's professional
 [Bravura](https://github.com/steinbergmedia/bravura) SMuFL font, bundled unmodified under the

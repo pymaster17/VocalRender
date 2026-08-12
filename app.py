@@ -359,9 +359,12 @@ NOTE_DURATION_LEGEND_HTML = (
 )
 
 VOICE_PRESETS = {
-    "Included voice 1": "assets/2003000081.wav",
-    "Included voice 2": "assets/2017000644.wav",
-    "Included voice 3": "assets/2044001666.wav",
+    "Alto-1": "assets/alto-1.wav",
+    "Alto-2": "assets/alto-2.wav",
+    "Alto-3": "assets/alto-3.wav",
+    "Tenor-1": "assets/tenor-1.wav",
+    "Tenor-2": "assets/tenor-2.wav",
+    "Tenor-3": "assets/tenor-3.wav",
     "Upload my own voice": None,
 }
 
@@ -564,18 +567,27 @@ with gr.Blocks(elem_id="col-container") as demo:
         )
 
     with gr.Column(elem_id="col-container"):
-        with gr.Accordion("Preview the three included voices", open=False):
+        with gr.Accordion("Preview the six included voices", open=False):
+            gr.Markdown("**Alto references**")
             with gr.Row():
-                for preset_name, preset_path in list(VOICE_PRESETS.items())[:3]:
+                for preset_name in ("Alto-1", "Alto-2", "Alto-3"):
                     gr.Audio(
-                        value=preset_path,
+                        value=VOICE_PRESETS[preset_name],
+                        label=preset_name,
+                        interactive=False,
+                    )
+            gr.Markdown("**Tenor references**")
+            with gr.Row():
+                for preset_name in ("Tenor-1", "Tenor-2", "Tenor-3"):
+                    gr.Audio(
+                        value=VOICE_PRESETS[preset_name],
                         label=preset_name,
                         interactive=False,
                     )
 
         voice_preset = gr.Radio(
             choices=list(VOICE_PRESETS),
-            value="Included voice 1",
+            value="Alto-1",
             label="1. Choose a voice reference",
             info="Use an included singing voice, or choose Upload my own voice below.",
         )

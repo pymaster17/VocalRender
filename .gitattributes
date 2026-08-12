@@ -37,3 +37,9 @@ assets/2003000081.wav filter=lfs diff=lfs merge=lfs -text
 assets/2017000644.wav filter=lfs diff=lfs merge=lfs -text
 assets/2044001666.wav filter=lfs diff=lfs merge=lfs -text
 assets/fonts/Bravura.woff2 filter=lfs diff=lfs merge=lfs -text
+assets/alto-1.wav filter=lfs diff=lfs merge=lfs -text
+assets/alto-2.wav filter=lfs diff=lfs merge=lfs -text
+assets/alto-3.wav filter=lfs diff=lfs merge=lfs -text
+assets/tenor-1.wav filter=lfs diff=lfs merge=lfs -text
+assets/tenor-2.wav filter=lfs diff=lfs merge=lfs -text
+assets/tenor-3.wav filter=lfs diff=lfs merge=lfs -text
