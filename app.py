@@ -590,7 +590,8 @@ with gr.Blocks(elem_id="col-container") as demo:
         with gr.Row():
             lyrics_str = gr.Textbox(
                 label="2. Enter lyrics",
-                value="我的孤独是真的",
+                value="",
+                placeholder="Enter Chinese lyrics, or click 🎲 Random score preset",
                 info="Type normally, or use | to choose the exact split. Write SP for a rest or breath.",
                 scale=5,
             )
