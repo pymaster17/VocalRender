@@ -1,0 +1,12 @@
+torch
+torchaudio
+transformers
+einops
+numpy
+scipy
+soundfile
+librosa
+safetensors
+accelerate
+pydantic
+datasets
