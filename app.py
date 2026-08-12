@@ -172,7 +172,7 @@ def _encode_prompt_audio(wav_path: str, model, max_frames: int = 50):
 
 def _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm):
     """Parse text-area inputs into the JSON entry format."""
-    words = [w.strip() for w in lyrics_str.split("|") if w.strip()]
+    words = _split_lyrics(lyrics_str)
     pitches = [int(p.strip()) for p in pitches_str.split(",") if p.strip()]
     notes = [n.strip() for n in notes_str.split(",") if n.strip()]
     pitch2word = [int(p.strip()) for p in pitch2word_str.split(",") if p.strip()]
@@ -336,22 +336,47 @@ EXAMPLES = [
 ]
 
 MAX_SCORE_WORDS = 64
+CHINESE_PUNCTUATION = "，。！？、；：‘’“”（）《》〈〉【】…—·,.!?;:()[]-"
+
+
+def _validate_chinese_lyrics(lyrics: str) -> None:
+    """Reject unsupported languages before a ZeroGPU request is made."""
+    text = (lyrics or "").strip()
+    if not text:
+        raise gr.Error("Enter some Chinese lyrics before creating the score editor.")
+
+    # Remove supported structural tokens before checking the remaining text.
+    check_text = re.sub(r"(?i)(?<![A-Za-z])SP(?![A-Za-z])", "", text)
+    check_text = check_text.replace("|", "")
+    check_text = re.sub(r"\s+", "", check_text)
+    check_text = check_text.translate(str.maketrans("", "", CHINESE_PUNCTUATION))
+
+    unsupported = sorted({char for char in check_text if not ("\u3400" <= char <= "\u9fff")})
+    if unsupported:
+        preview = " ".join(unsupported[:8])
+        raise gr.Error(
+            "VocalRender was trained only on Chinese lyrics. "
+            f"Please remove unsupported characters or languages: {preview}"
+        )
+
+    if not any("\u3400" <= char <= "\u9fff" for char in check_text):
+        raise gr.Error("Please enter Chinese lyrics. This checkpoint does not support other languages.")
 
 
 def _split_lyrics(lyrics: str) -> List[str]:
-    """Split pipe-delimited lyrics, Chinese text, or space-delimited text."""
+    """Validate Chinese lyrics and split them into sung units."""
     lyrics = (lyrics or "").strip()
-    if not lyrics:
-        return []
+    _validate_chinese_lyrics(lyrics)
     if "|" in lyrics:
-        words = [word.strip() for word in lyrics.split("|") if word.strip()]
+        words = [
+            word.strip().strip(CHINESE_PUNCTUATION)
+            for word in lyrics.split("|")
+            if word.strip().strip(CHINESE_PUNCTUATION)
+        ]
     else:
-        # Keep English words together and split CJK lyrics into individual characters.
-        words = re.findall(
-            r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?|[\u3400-\u9fff]|[^\W_]",
-            lyrics,
-            flags=re.UNICODE,
-        )
+        # Keep SP as a rest token; ignore punctuation when splitting Chinese characters.
+        normalized = re.sub(r"(?i)(?<![A-Za-z])SP(?![A-Za-z])", "|SP|", lyrics)
+        words = re.findall(r"SP|[\u3400-\u9fff]", normalized, flags=re.IGNORECASE)
     if len(words) > MAX_SCORE_WORDS:
         raise gr.Error(f"Please use at most {MAX_SCORE_WORDS} lyric units per generation.")
     return words
@@ -397,11 +422,11 @@ with gr.Blocks(elem_id="col-container") as demo:
         gr.Markdown(
             "### What you need\n"
             "1. **A voice reference:** choose an included voice, or upload 2–8 seconds of clean, unaccompanied singing.\n"
-            "2. **Lyrics:** type a phrase normally. Chinese is split character by character; "
-            "space-delimited languages are split into words. You can also use `|` to control the split.\n"
+            "2. **Lyrics:** enter Chinese lyrics. They are split character by character; "
+            "you can also use `|` to control the split. Other languages are not supported by this checkpoint.\n"
             "3. **Melody and rhythm:** press **Create word-by-word score**, then set one pitch and note value for each lyric unit.\n"
             "4. **Generate:** choose the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.\n\n"
-            "> This research demo currently works best with Chinese lyrics. Only upload a voice "
+            "> This checkpoint supports Chinese lyrics only. Other languages are rejected before inference. Only upload a voice "
             "recording that you own or have permission to use."
         )
 

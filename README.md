@@ -26,12 +26,12 @@ VocalRender turns a written vocal part into a sung audio performance. You give i
 
 It then generates a new vocal performance at 48 kHz. The reference recording provides the
 voice character and does not need to contain the same lyrics or melody. This research demo
-currently works best with Chinese lyrics.
+supports Chinese lyrics only. Inputs containing other languages are rejected before inference.
 
-For the normal workflow, type the lyrics and press **Create word-by-word score**. Chinese lyrics
-are split character by character, while space-delimited languages are split into words. Then use
-the pitch slider and note-duration menu beside each lyric unit. You do not need to understand the
-model architecture or write code.
+For the normal workflow, type Chinese lyrics and press **Create word-by-word score**. The lyrics
+are split character by character. Then use the pitch slider and note-duration menu beside each
+lyric unit. You do not need to understand the model architecture or write code. Other languages
+are rejected because the released checkpoint was trained only on Chinese lyrics.
 
 An advanced raw-score editor remains available for melismas, where one syllable is sung across
 multiple notes, and for direct use of VocalRender's native input format.
