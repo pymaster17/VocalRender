@@ -4,6 +4,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import spaces  # MUST come before any torch / CUDA-touching import
 import sys
 import json
+import re
 import time
 import tempfile
 from pathlib import Path
@@ -190,8 +191,7 @@ def _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm):
     }
 
 
-@spaces.GPU(duration=60)
-def generate(
+def _generate_impl(
     voice_preset: str,
     prompt_audio,
     lyrics_str: str,
@@ -275,6 +275,11 @@ def generate(
     return out_path, gr.Markdown(info), svs_prompt
 
 
+# Advanced/raw score endpoint. The word-by-word editor defines its own decorated
+# endpoint inside gr.render because its component count is dynamic.
+generate = spaces.GPU(duration=60)(_generate_impl)
+
+
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
@@ -330,6 +335,54 @@ EXAMPLES = [
     },
 ]
 
+MAX_SCORE_WORDS = 64
+
+
+def _split_lyrics(lyrics: str) -> List[str]:
+    """Split pipe-delimited lyrics, Chinese text, or space-delimited text."""
+    lyrics = (lyrics or "").strip()
+    if not lyrics:
+        return []
+    if "|" in lyrics:
+        words = [word.strip() for word in lyrics.split("|") if word.strip()]
+    else:
+        # Keep English words together and split CJK lyrics into individual characters.
+        words = re.findall(
+            r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?|[\u3400-\u9fff]|[^\W_]",
+            lyrics,
+            flags=re.UNICODE,
+        )
+    if len(words) > MAX_SCORE_WORDS:
+        raise gr.Error(f"Please use at most {MAX_SCORE_WORDS} lyric units per generation.")
+    return words
+
+
+def _score_rows_from_lyrics(lyrics: str) -> List[Dict]:
+    words = _split_lyrics(lyrics)
+    if not words:
+        raise gr.Error("Enter some lyrics before creating the score editor.")
+    return [
+        {
+            "word": word,
+            "pitch": 0 if word.upper() == "SP" else 60,
+            "note": "<NOTE_4>",
+        }
+        for word in words
+    ]
+
+
+def _easy_rows_from_example(example: Dict) -> List[Dict]:
+    """Reduce a potentially melismatic example to one editable note per lyric unit."""
+    words = _split_lyrics(example["lyrics"])
+    pitches = [int(value) for value in example["pitches"].split(",")]
+    notes = example["notes"].split(",")
+    mapping = [int(value) for value in example["pitch2word"].split(",")]
+    rows = []
+    for word_index, word in enumerate(words):
+        note_index = mapping.index(word_index) if word_index in mapping else min(word_index, len(pitches) - 1)
+        rows.append({"word": word, "pitch": pitches[note_index], "note": notes[note_index]})
+    return rows
+
 with gr.Blocks(elem_id="col-container") as demo:
     gr.Markdown(
         "# 🎵 VocalRender Demo — Turn a score into a singing voice\n"
@@ -344,11 +397,10 @@ with gr.Blocks(elem_id="col-container") as demo:
         gr.Markdown(
             "### What you need\n"
             "1. **A voice reference:** choose an included voice, or upload 2–8 seconds of clean, unaccompanied singing.\n"
-            "2. **Lyrics:** separate sung syllables with `|`. Use `SP` for a rest or breath.\n"
-            "3. **Melody:** enter MIDI note numbers. For reference, middle C is 60; use 0 for a rest.\n"
-            "4. **Rhythm and tempo:** choose a duration for each note and enter the song's BPM.\n\n"
-            "To hear it immediately, select one of the prepared examples at the bottom and press "
-            "**Generate Singing**. The first run may wait in a shared GPU queue.\n\n"
+            "2. **Lyrics:** type a phrase normally. Chinese is split character by character; "
+            "space-delimited languages are split into words. You can also use `|` to control the split.\n"
+            "3. **Melody and rhythm:** press **Create word-by-word score**, then set one pitch and note value for each lyric unit.\n"
+            "4. **Generate:** choose the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.\n\n"
             "> This research demo currently works best with Chinese lyrics. Only upload a voice "
             "recording that you own or have permission to use."
         )
@@ -379,30 +431,16 @@ with gr.Blocks(elem_id="col-container") as demo:
 
         with gr.Row():
             lyrics_str = gr.Textbox(
-                label="2. Lyrics (separate each sung syllable with |)",
-                value="我|的|孤|独|是|真|的",
-                info="Example: 我|的|孤|独. Write SP where the singer rests or breathes.",
+                label="2. Enter lyrics",
+                value="我的孤独是真的",
+                info="Type normally, or use | to choose the exact split. Write SP for a rest or breath.",
             )
 
-        with gr.Row():
-            pitches_str = gr.Textbox(
-                label="3. Melody (MIDI note numbers)",
-                value="65,64,64,65,67,65,67,69,63",
-                info="One number per note, separated by commas. Middle C is 60; use 0 for a rest.",
-            )
-            notes_str = gr.Textbox(
-                label="4. Rhythm (note durations)",
-                value="<NOTE_8>,<NOTE_32>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_8>",
-                info="Use NOTE_4 for a quarter note, NOTE_8 for an eighth note, and DOT for dotted notes.",
-            )
+        split_btn = gr.Button("Create word-by-word score")
+        score_rows = gr.State(_easy_rows_from_example(EXAMPLES[0]))
 
         with gr.Row():
-            pitch2word_str = gr.Textbox(
-                label="Which lyric syllable belongs to each note? (advanced)",
-                value="0,1,2,2,2,3,4,5,6",
-                info="Starting from 0, map every note to a lyric syllable. Leave empty when there is exactly one note per syllable.",
-            )
-            bpm = gr.Number(label="5. Tempo (BPM)", value=64, precision=0)
+            bpm = gr.Number(label="4. Tempo (BPM)", value=64, precision=0)
 
         with gr.Accordion("Advanced settings", open=False):
             with gr.Row():
@@ -411,27 +449,127 @@ with gr.Blocks(elem_id="col-container") as demo:
                 temperature = gr.Slider(0.1, 2.0, value=1.0, step=0.1, label="Temperature")
                 max_len = gr.Slider(100, 3000, value=2000, step=100, label="Max length (patches)")
 
-        run_btn = gr.Button("Generate Singing", variant="primary")
+        @gr.render(inputs=score_rows)
+        def render_word_score(rows):
+            if not rows:
+                gr.Markdown("Enter lyrics and press **Create word-by-word score**.")
+                return
+
+            gr.Markdown(
+                "### 3. Set pitch and duration for each lyric unit\n"
+                "Pitch uses MIDI numbers (60 = middle C/C4). Set pitch to 0 for a rest."
+            )
+            pitch_controls = []
+            note_controls = []
+            for index, row in enumerate(rows):
+                with gr.Row(key=f"score-row-{index}"):
+                    gr.Textbox(
+                        value=row["word"],
+                        label=f"Word {index + 1}",
+                        interactive=False,
+                        scale=1,
+                        key=f"score-word-{index}",
+                    )
+                    pitch = gr.Slider(
+                        minimum=0,
+                        maximum=127,
+                        value=row["pitch"],
+                        step=1,
+                        label="Pitch",
+                        scale=3,
+                        key=f"score-pitch-{index}",
+                    )
+                    note = gr.Dropdown(
+                        choices=NOTE_OPTIONS,
+                        value=row["note"],
+                        label="Note duration",
+                        scale=2,
+                        key=f"score-note-{index}",
+                    )
+                    pitch_controls.append(pitch)
+                    note_controls.append(note)
+
+            easy_run_btn = gr.Button("Generate Singing", variant="primary", key="easy-generate")
+            easy_inputs = [
+                voice_preset,
+                prompt_audio,
+                bpm,
+                cfg_value,
+                inference_timesteps,
+                temperature,
+                max_len,
+                *pitch_controls,
+                *note_controls,
+            ]
+
+            @spaces.GPU(duration=60)
+            def generate_from_word_score(*values):
+                voice, uploaded_audio, tempo, cfg, steps, temp, length, *score_values = values
+                row_count = len(rows)
+                pitches = [int(value) for value in score_values[:row_count]]
+                notes = score_values[row_count:]
+                words = [row["word"] for row in rows]
+                return _generate_impl(
+                    voice,
+                    uploaded_audio,
+                    "|".join(words),
+                    ",".join(map(str, pitches)),
+                    ",".join(notes),
+                    ",".join(map(str, range(row_count))),
+                    tempo,
+                    cfg,
+                    steps,
+                    temp,
+                    length,
+                )
+
+            easy_run_btn.click(
+                fn=generate_from_word_score,
+                inputs=easy_inputs,
+                outputs=[audio_out, status_out, prompt_out],
+                key="generate-word-score",
+            )
+
+        split_btn.click(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
+        lyrics_str.submit(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
+
+        with gr.Accordion("Advanced raw score input", open=False):
+            gr.Markdown(
+                "Use this mode for melismas (multiple notes on one syllable), custom rests, "
+                "or direct editing of VocalRender's native score format."
+            )
+            pitches_str = gr.Textbox(
+                label="MIDI pitches",
+                value="65,64,64,65,67,65,67,69,63",
+            )
+            notes_str = gr.Textbox(
+                label="Note duration tokens",
+                value="<NOTE_8>,<NOTE_32>,<NOTE_16>,<NOTE_16>,<NOTE_16>,<NOTE_8>,<NOTE_16>,<NOTE_16>,<NOTE_8>",
+            )
+            pitch2word_str = gr.Textbox(
+                label="Pitch-to-word mapping",
+                value="0,1,2,2,2,3,4,5,6",
+            )
+            advanced_run_btn = gr.Button("Generate from raw score")
+
         status_out = gr.Markdown("")
         prompt_out = gr.Textbox(label="Generated SVS prompt (debug)", visible=False)
         audio_out = gr.Audio(label="Synthesized Singing", type="filepath", format="wav")
 
-    # Wire the button
-    run_btn.click(
+    advanced_run_btn.click(
         fn=generate,
         inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm,
                 cfg_value, inference_timesteps, temperature, max_len],
         outputs=[audio_out, status_out, prompt_out],
     )
 
-    # Examples
-    gr.Examples(
-        examples=[
-            [e["voice_preset"], None, e["lyrics"], e["pitches"], e["notes"], e["pitch2word"], e["bpm"]]
-            for e in EXAMPLES
-        ],
-        inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm],
-        label="Ready-to-use score examples",
-    )
+    with gr.Accordion("Advanced ready-to-use score examples", open=False):
+        gr.Examples(
+            examples=[
+                [e["voice_preset"], None, e["lyrics"], e["pitches"], e["notes"], e["pitch2word"], e["bpm"]]
+                for e in EXAMPLES
+            ],
+            inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm],
+        )
 
 demo.launch(mcp_server=True, theme=gr.themes.Citrus(), css=CSS)
