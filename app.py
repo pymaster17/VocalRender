@@ -5,6 +5,7 @@ import spaces  # MUST come before any torch / CUDA-touching import
 import sys
 import json
 import re
+import base64
 import time
 import tempfile
 from pathlib import Path
@@ -284,17 +285,27 @@ generate = spaces.GPU(duration=60)(_generate_impl)
 # UI
 # ---------------------------------------------------------------------------
 
+BRAVURA_FONT_DATA = base64.b64encode(
+    (Path(__file__).parent / "assets/fonts/Bravura.woff2").read_bytes()
+).decode("ascii")
+
 CSS = """
+@font-face {
+  font-family: "BravuraVocalRender";
+  src: url("data:font/woff2;base64,__BRAVURA_FONT_DATA__") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+}
 #col-container { max-width: 1100px; margin: 0 auto; }
 .dark .gradio-container { color: var(--body-text-color); }
 .note-legend { display: flex; flex-wrap: wrap; gap: .45rem; margin: .4rem 0 1rem; }
 .note-choice { display: flex; min-width: 74px; flex-direction: column; align-items: center; padding: .3rem; border: 1px solid #ddd; border-radius: .45rem; }
-.note-choice svg { width: 42px; height: 42px; color: currentColor; }
 .note-choice small { font-size: .68rem; text-align: center; }
 .selected-note { display: flex; align-items: center; gap: .5rem; min-height: 66px; padding: .4rem .6rem; border: 1px solid #ddd; border-radius: .5rem; }
-.selected-note svg { width: 42px; height: 42px; color: currentColor; flex: none; }
+.bravura-note { display: inline-flex; align-items: center; min-width: 46px; height: 48px; font-family: "BravuraVocalRender"; font-size: 3rem; line-height: 1; }
+.bravura-dot { margin-left: -.3rem; font-family: "BravuraVocalRender"; font-size: 2.2rem; }
 .dark .note-choice, .dark .selected-note { border-color: #444; }
-"""
+""".replace("__BRAVURA_FONT_DATA__", BRAVURA_FONT_DATA)
 
 NOTE_OPTIONS = [
     "<NOTE_1>", "<NOTE_2>", "<NOTE_4>", "<NOTE_8>", "<NOTE_16>", "<NOTE_32>",
@@ -321,29 +332,25 @@ NOTE_TO_DURATION_INDEX = {
 }
 
 
-def _note_icon_svg(token: str) -> str:
-    """Render a font-independent music-note icon as inline SVG."""
+def _note_icon_html(token: str) -> str:
+    """Render a professional notation glyph from the bundled Bravura font."""
     dotted = "_DOT_" in token
     denominator = int(re.search(r"(\d+)>$", token).group(1))
-    hollow = denominator in (1, 2)
-    head = (
-        '<ellipse cx="24" cy="34" rx="11" ry="6.5" transform="rotate(-18 24 34)" '
-        f'fill="{"none" if hollow else "currentColor"}" stroke="currentColor" stroke-width="3"/>'
-    )
-    stem = "" if denominator == 1 else '<path d="M34 32V7" fill="none" stroke="currentColor" stroke-width="3"/>'
-    flag_count = {8: 1, 16: 2, 32: 3}.get(denominator, 0)
-    flags = "".join(
-        f'<path d="M34 {7 + offset * 7} C49 {10 + offset * 7}, 48 {20 + offset * 7}, 38 {23 + offset * 7}" '
-        'fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'
-        for offset in range(flag_count)
-    )
-    dot = '<circle cx="43" cy="34" r="2.6" fill="currentColor"/>' if dotted else ""
-    return f'<svg viewBox="0 0 58 48" aria-hidden="true">{head}{stem}{flags}{dot}</svg>'
+    codepoint = {
+        1: "1D15D",
+        2: "1D15E",
+        4: "1D15F",
+        8: "1D160",
+        16: "1D161",
+        32: "1D162",
+    }[denominator]
+    dot = '<span class="bravura-dot">&#xE1E7;</span>' if dotted else ""
+    return f'<span class="bravura-note" aria-hidden="true">&#x{codepoint};{dot}</span>'
 
 
 def _duration_html(index: int, compact: bool = False) -> str:
     label, token = NOTE_DURATION_OPTIONS[int(index)]
-    icon = _note_icon_svg(token)
+    icon = _note_icon_html(token)
     if compact:
         return f'<div class="selected-note">{icon}<span>{label}</span></div>'
     return f'<div class="note-choice"><strong>{index}</strong>{icon}<small>{label}</small></div>'

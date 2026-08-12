@@ -39,6 +39,10 @@ multiple notes, and for direct use of VocalRender's native input format.
 
 Only upload voice recordings that you own or have permission to use.
 
+The music-notation icons use Steinberg's professional
+[Bravura](https://github.com/steinbergmedia/bravura) SMuFL font, bundled unmodified under the
+[SIL Open Font License](assets/fonts/Bravura-LICENSE.txt).
+
 ## Model
 
 Based on [pymaster/VocalRender](https://huggingface.co/pymaster/VocalRender) — an autoregressive diffusion model initialized from VoxCPM2 speech-pretrained weights.
