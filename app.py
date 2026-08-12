@@ -501,6 +501,43 @@ def _delete_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -
         raise gr.Error("Each lyric unit must keep at least one note.")
     return rows[:row_index] + rows[row_index + 1:]
 
+
+@spaces.GPU(duration=60)
+def generate_from_word_score(
+    rows,
+    voice,
+    uploaded_audio,
+    tempo,
+    cfg,
+    steps,
+    temperature,
+    max_len,
+    *score_values,
+):
+    """Top-level ZeroGPU endpoint for the dynamic word-by-word score editor."""
+    row_count = len(rows)
+    pitches = [int(value) for value in score_values[:row_count]]
+    duration_indices = [int(round(value)) for value in score_values[row_count:]]
+    notes = [NOTE_DURATION_OPTIONS[index][1] for index in duration_indices]
+    words_by_index = {}
+    for row in rows:
+        words_by_index[row["word_index"]] = row["word"]
+    words = [words_by_index[index] for index in sorted(words_by_index)]
+    pitch2word = [row["word_index"] for row in rows]
+    return _generate_impl(
+        voice,
+        uploaded_audio,
+        "|".join(words),
+        ",".join(map(str, pitches)),
+        ",".join(notes),
+        ",".join(map(str, pitch2word)),
+        tempo,
+        cfg,
+        steps,
+        temperature,
+        max_len,
+    )
+
 with gr.Blocks(elem_id="col-container") as demo:
     gr.Markdown(
         "# 🎵 VocalRender Demo — Turn a score into a singing voice\n"
@@ -673,6 +710,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 )
 
             easy_inputs = [
+                score_rows,
                 voice_preset,
                 prompt_audio,
                 bpm,
@@ -683,32 +721,6 @@ with gr.Blocks(elem_id="col-container") as demo:
                 *pitch_controls,
                 *duration_controls,
             ]
-
-            @spaces.GPU(duration=60)
-            def generate_from_word_score(*values):
-                voice, uploaded_audio, tempo, cfg, steps, temp, length, *score_values = values
-                row_count = len(rows)
-                pitches = [int(value) for value in score_values[:row_count]]
-                duration_indices = [int(round(value)) for value in score_values[row_count:]]
-                notes = [NOTE_DURATION_OPTIONS[index][1] for index in duration_indices]
-                words_by_index = {}
-                for row in rows:
-                    words_by_index[row["word_index"]] = row["word"]
-                words = [words_by_index[index] for index in sorted(words_by_index)]
-                pitch2word = [row["word_index"] for row in rows]
-                return _generate_impl(
-                    voice,
-                    uploaded_audio,
-                    "|".join(words),
-                    ",".join(map(str, pitches)),
-                    ",".join(notes),
-                    ",".join(map(str, pitch2word)),
-                    tempo,
-                    cfg,
-                    steps,
-                    temp,
-                    length,
-                )
 
             easy_run_btn.click(
                 fn=generate_from_word_score,
