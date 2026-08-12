@@ -35,6 +35,26 @@ lyric unit. If a syllable spans multiple notes, press **+ Melisma note** and edi
 independently. You do not need to understand the model architecture or write code. Other
 languages are rejected because the released checkpoint was trained only on Chinese lyrics.
 
+Musicians can also open **Import ABC notation or MusicXML**. ABC notation can be pasted directly
+or uploaded as `.abc`/`.txt`; MusicXML can be uploaded as `.musicxml`, `.xml`, or compressed `.mxl`.
+After parsing, choose the work or vocal part, lyric line, and a contiguous measure range, then load
+it into the same editable score. The importer prefers a lyric-bearing monophonic part and embedded
+lyrics, while still allowing either choice to be changed.
+
+VocalRender's score vocabulary is monophonic and intentionally compact. Exact whole through
+thirty-second note values and their dotted forms are preserved. Other values are quantized only
+when the relative error is at most 12.5%, with a visible warning. Chords, overlapping voices,
+zero-duration grace notes, or larger rhythmic changes are rejected with their score location
+instead of silently choosing a melody. A selected range may contain at most 64 lyric/rest units
+and 128 note/rest events. Scores with tempo changes use the range's starting BPM and report that
+the range has been flattened to one tempo.
+
+MusicXML lyric extensions, ties, and ABC `w:` underscore (`_`) melismas are converted to
+VocalRender's pitch-to-word alignment. If the selected part has no embedded lyrics, enter Chinese
+lyrics in the normal textbox before loading the range; the number of lyric units must exactly
+match the pitched note attacks. ABC import is powered by `music21`, which implements ABC 1.6 and
+much, but not all, of ABC 2.1.
+
 The **🎲 Random score preset** button chooses one of 100 ready-to-use score segments sampled from
 the processed CloudTest data and loads its lyrics, complete melisma-aware score and BPM into the
 editor. It does not start inference, so every value can be adjusted before pressing **Generate
@@ -67,3 +87,4 @@ The demo includes a checkpoint selector for both `VocalRender-Pro` and `VocalRen
 - **Notes**: Duration tokens (`<NOTE_4>` is a quarter note, `<NOTE_8>` is an eighth note, and dotted variants use `DOT`)
 - **BPM**: Beats per minute
 - **Voice reference**: choose one of six included voices, or upload a 2-8 second singing clip for the target voice timbre
+- **Score import**: pasted/uploaded ABC notation or uploaded MusicXML (`.musicxml`, `.xml`, `.mxl`)

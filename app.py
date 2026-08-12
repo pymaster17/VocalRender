@@ -6,6 +6,7 @@ import sys
 import json
 import re
 import base64
+import hashlib
 import random
 import time
 import tempfile
@@ -22,6 +23,14 @@ from einops import rearrange
 
 # Add the bundled src directory to the path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from vocalrender.utils.score_import import (
+    ScoreImportError,
+    convert_selection as convert_imported_selection,
+    get_part as get_imported_part,
+    parse_score as parse_imported_score_data,
+    part_summary as imported_part_summary,
+)
 
 MODEL_ID = "pymaster/VocalRender"
 CKPT_VARIANTS = ("VocalRender-Pro", "VocalRender")
@@ -190,13 +199,23 @@ def _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm):
     if not pitch2word:
         pitch2word = list(range(len(pitches)))
 
+    bpm = int(bpm)
+    if not 1 <= bpm <= 255:
+        raise gr.Error("Tempo must be between 1 and 255 BPM.")
+    if not pitches or len(pitches) != len(notes) or len(pitches) != len(pitch2word):
+        raise gr.Error("Every score event must have one pitch, duration, and lyric mapping.")
+    if any(not 0 <= pitch <= 127 for pitch in pitches):
+        raise gr.Error("MIDI pitches must be between 0 and 127.")
+    if any(word_index < 0 or word_index >= len(words) for word_index in pitch2word):
+        raise gr.Error("The score contains an invalid lyric-to-note mapping.")
+
     return {
         "item_name": "user_input",
         "word": words,
         "pitch": pitches,
         "note": notes,
         "pitch2word": pitch2word,
-        "bpm": int(bpm),
+        "bpm": bpm,
     }
 
 
@@ -436,11 +455,12 @@ def _score_rows_from_lyrics(lyrics: str) -> List[Dict]:
     words = _split_lyrics(lyrics)
     if not words:
         raise gr.Error("Enter some lyrics before creating the score editor.")
+    score_key = hashlib.sha1("|".join(words).encode("utf-8")).hexdigest()[:10]
     return [
         {
             "word": word,
             "word_index": word_index,
-            "uid": f"{word_index}-0",
+            "uid": f"manual-{score_key}-{word_index}-0",
             "pitch": 0 if word.upper() == "SP" else 60,
             "duration_index": NOTE_TO_DURATION_INDEX["<NOTE_4>"],
         }
@@ -466,7 +486,7 @@ def _preset_to_rows(preset: Dict) -> List[Dict]:
         rows.append({
             "word": words[word_index],
             "word_index": word_index,
-            "uid": f"{word_index}-{occurrence[word_index] - 1}",
+            "uid": f"preset-{preset['id']}-{word_index}-{occurrence[word_index] - 1}",
             "pitch": pitches[note_index],
             "duration_index": NOTE_TO_DURATION_INDEX[token],
         })
@@ -484,16 +504,20 @@ def load_random_preset():
     return lyrics, rows, preset["bpm"], message
 
 
-def _sync_score_rows(rows: List[Dict], pitches, durations) -> List[Dict]:
+def _sync_score_rows(rows: List[Dict], words, pitches, durations) -> List[Dict]:
     synced = [dict(row) for row in rows]
+    words_by_index = {}
+    for row, word in zip(synced, words):
+        words_by_index.setdefault(row["word_index"], str(word).strip())
     for row, pitch, duration in zip(synced, pitches, durations):
+        row["word"] = words_by_index[row["word_index"]]
         row["pitch"] = int(pitch)
         row["duration_index"] = int(round(duration))
     return synced
 
 
-def _add_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -> List[Dict]:
-    rows = _sync_score_rows(rows, pitches, durations)
+def _add_melisma_note(rows: List[Dict], row_index: int, words, pitches, durations) -> List[Dict]:
+    rows = _sync_score_rows(rows, words, pitches, durations)
     source = rows[row_index]
     insert_at = max(
         index for index, row in enumerate(rows)
@@ -510,8 +534,8 @@ def _add_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -> L
     return rows
 
 
-def _delete_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -> List[Dict]:
-    rows = _sync_score_rows(rows, pitches, durations)
+def _delete_melisma_note(rows: List[Dict], row_index: int, words, pitches, durations) -> List[Dict]:
+    rows = _sync_score_rows(rows, words, pitches, durations)
     word_index = rows[row_index]["word_index"]
     if sum(row["word_index"] == word_index for row in rows) <= 1:
         raise gr.Error("Each lyric unit must keep at least one note.")
@@ -533,12 +557,13 @@ def generate_from_word_score(
 ):
     """Top-level ZeroGPU endpoint for the dynamic word-by-word score editor."""
     row_count = len(rows)
-    pitches = [int(value) for value in score_values[:row_count]]
-    duration_indices = [int(round(value)) for value in score_values[row_count:]]
+    words_input = [str(value).strip() for value in score_values[:row_count]]
+    pitches = [int(value) for value in score_values[row_count:row_count * 2]]
+    duration_indices = [int(round(value)) for value in score_values[row_count * 2:]]
     notes = [NOTE_DURATION_OPTIONS[index][1] for index in duration_indices]
     words_by_index = {}
-    for row in rows:
-        words_by_index[row["word_index"]] = row["word"]
+    for row, word in zip(rows, words_input):
+        words_by_index.setdefault(row["word_index"], word)
     words = [words_by_index[index] for index in sorted(words_by_index)]
     pitch2word = [row["word_index"] for row in rows]
     return _generate_impl(
@@ -556,6 +581,75 @@ def generate_from_word_score(
         max_len,
     )
 
+
+def _import_part_updates(parsed: Dict, part_key: str):
+    """Build Gradio updates for a selected imported part."""
+    try:
+        part = get_imported_part(parsed, part_key)
+    except (ScoreImportError, TypeError) as exc:
+        raise gr.Error(str(exc)) from exc
+    verse_choices = [
+        (f"Embedded lyric line {verse_id}", verse_id)
+        for verse_id in part["verses"]
+    ]
+    verse_choices.append(("Use lyrics textbox", "__external__"))
+    verse_value = part["verses"][0] if part["verses"] else "__external__"
+    measure_choices = [(f"Measure {measure}", measure) for measure in part["measures"]]
+    return (
+        gr.Dropdown(choices=verse_choices, value=verse_value),
+        gr.Dropdown(choices=measure_choices, value=part["measures"][0]),
+        gr.Dropdown(choices=measure_choices, value=part["measures"][-1]),
+        imported_part_summary(part),
+    )
+
+
+def parse_score_for_editor(score_file, abc_text):
+    """Parse an upload/paste without requesting a GPU."""
+    try:
+        parsed = parse_imported_score_data(file_path=score_file, abc_text=abc_text)
+        part_choices = [(part["label"], part["key"]) for part in parsed["parts"]]
+        part_key = parsed["default_part"]
+        verse_update, start_update, end_update, summary = _import_part_updates(parsed, part_key)
+        return (
+            parsed,
+            gr.Dropdown(choices=part_choices, value=part_key),
+            verse_update,
+            start_update,
+            end_update,
+            "✅ Score parsed. " + summary,
+        )
+    except ScoreImportError as exc:
+        raise gr.Error(str(exc)) from exc
+
+
+def change_imported_part(parsed, part_key):
+    if not parsed:
+        raise gr.Error("Parse a score first.")
+    return _import_part_updates(parsed, part_key)
+
+
+def load_imported_score(parsed, part_key, verse_id, start_measure, end_measure, lyrics):
+    """Convert the selected range into the existing editable score rows."""
+    if not parsed:
+        raise gr.Error("Parse a score first.")
+    try:
+        result = convert_imported_selection(
+            parsed,
+            part_key=part_key,
+            verse_id=verse_id,
+            start_measure=str(start_measure),
+            end_measure=str(end_measure),
+            external_lyrics=lyrics,
+        )
+    except ScoreImportError as exc:
+        raise gr.Error(str(exc)) from exc
+    message = f"✅ **{result['summary']}**"
+    if result["warnings"]:
+        message += "\n\n**Import notes**\n" + "\n".join(
+            f"- {warning}" for warning in result["warnings"]
+        )
+    return result["lyrics"], result["rows"], result["bpm"], message
+
 with gr.Blocks(elem_id="col-container") as demo:
     gr.Markdown(
         "# 🎵 VocalRender Demo — Turn a score into a singing voice\n"
@@ -571,8 +665,9 @@ with gr.Blocks(elem_id="col-container") as demo:
             "### What you need\n"
             "1. **A voice reference:** choose an included voice, or upload 2–8 seconds of clean, unaccompanied singing.\n"
             "2. **Lyrics:** enter Chinese lyrics. They are split character by character; "
-            "you can also use `|` to control the split. Other languages are not supported by this checkpoint.\n"
-            "3. **Melody and rhythm:** press **Create word-by-word score**, then set pitch and duration. "
+            "you can also use `|` to control the split, or import ABC/MusicXML below. "
+            "Other languages are not supported by this checkpoint.\n"
+            "3. **Melody and rhythm:** import a score, or press **Create word-by-word score**, then set pitch and duration. "
             "Use **+ Melisma note** when one lyric unit spans multiple notes.\n"
             "4. **Generate:** choose the tempo and press **Generate Singing**. Or press "
             "**🎲 Random score preset** to load a ready-made score, adjust it freely, then generate. "
@@ -624,11 +719,41 @@ with gr.Blocks(elem_id="col-container") as demo:
                 interactive=True,
             )
 
+        with gr.Accordion("Import ABC notation or MusicXML", open=False):
+            gr.Markdown(
+                "Paste ABC notation or upload `.abc`, `.txt`, `.musicxml`, `.xml`, or `.mxl`. "
+                "The importer selects the most likely vocal part, and you can change the part, "
+                "lyric line, and measure range before loading it into the editor."
+            )
+            with gr.Row():
+                abc_score_text = gr.Textbox(
+                    label="Paste ABC notation",
+                    lines=8,
+                    placeholder="X:1\nT:My song\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\nC D E F |\nw: 我 爱 唱 歌",
+                    scale=3,
+                )
+                score_file = gr.File(
+                    label="Or upload a score file",
+                    file_types=[".abc", ".txt", ".musicxml", ".xml", ".mxl"],
+                    type="filepath",
+                    scale=2,
+                )
+            parse_score_btn = gr.Button("Parse score", variant="secondary")
+            imported_score_state = gr.State(None)
+            with gr.Row():
+                imported_part = gr.Dropdown(label="Work / vocal part", choices=[])
+                imported_verse = gr.Dropdown(label="Lyric line", choices=[])
+            with gr.Row():
+                imported_start_measure = gr.Dropdown(label="Start measure", choices=[])
+                imported_end_measure = gr.Dropdown(label="End measure", choices=[])
+            imported_score_info = gr.Markdown("")
+            load_imported_btn = gr.Button("Load selected range into editor", variant="primary")
+
         with gr.Row():
             lyrics_str = gr.Textbox(
                 label="2. Enter lyrics",
                 value="",
-                placeholder="Enter Chinese lyrics, or click 🎲 Random score preset",
+                placeholder="Enter Chinese lyrics, import a score, or click 🎲 Random score preset",
                 info="Type normally, or use | to choose the exact split. Write SP for a rest or breath.",
                 scale=5,
             )
@@ -656,6 +781,7 @@ with gr.Blocks(elem_id="col-container") as demo:
             gr.HTML(NOTE_DURATION_LEGEND_HTML)
             pitch_controls = []
             duration_controls = []
+            word_controls = []
             add_buttons = []
             delete_buttons = []
             word_note_counts = {
@@ -665,10 +791,13 @@ with gr.Blocks(elem_id="col-container") as demo:
             for index, row in enumerate(rows):
                 uid = row["uid"]
                 with gr.Row(key=f"score-row-{uid}"):
-                    gr.Textbox(
+                    word_control = gr.Textbox(
                         value=row["word"],
                         label=f"Lyric {row['word_index'] + 1}",
-                        interactive=False,
+                        interactive=not any(
+                            previous["word_index"] == row["word_index"]
+                            for previous in rows[:index]
+                        ),
                         scale=1,
                         key=f"score-word-{uid}",
                     )
@@ -717,21 +846,30 @@ with gr.Blocks(elem_id="col-container") as demo:
                     )
                     pitch_controls.append(pitch)
                     duration_controls.append(duration)
+                    word_controls.append(word_control)
                     add_buttons.append(add_button)
                     delete_buttons.append(delete_button)
 
-            score_editor_inputs = [score_rows, *pitch_controls, *duration_controls]
+            score_editor_inputs = [score_rows, *word_controls, *pitch_controls, *duration_controls]
             for index, (add_button, delete_button) in enumerate(zip(add_buttons, delete_buttons)):
                 def add_note(current_rows, *values, row_index=index):
                     count = len(current_rows)
                     return _add_melisma_note(
-                        current_rows, row_index, values[:count], values[count:]
+                        current_rows,
+                        row_index,
+                        values[:count],
+                        values[count:count * 2],
+                        values[count * 2:],
                     )
 
                 def delete_note(current_rows, *values, row_index=index):
                     count = len(current_rows)
                     return _delete_melisma_note(
-                        current_rows, row_index, values[:count], values[count:]
+                        current_rows,
+                        row_index,
+                        values[:count],
+                        values[count:count * 2],
+                        values[count * 2:],
                     )
 
                 add_button.click(
@@ -757,6 +895,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 inference_timesteps,
                 temperature,
                 max_len,
+                *word_controls,
                 *pitch_controls,
                 *duration_controls,
             ]
@@ -789,6 +928,41 @@ with gr.Blocks(elem_id="col-container") as demo:
             _create_manual_score,
             inputs=lyrics_str,
             outputs=[score_rows, preset_info],
+        )
+
+        parse_score_btn.click(
+            fn=parse_score_for_editor,
+            inputs=[score_file, abc_score_text],
+            outputs=[
+                imported_score_state,
+                imported_part,
+                imported_verse,
+                imported_start_measure,
+                imported_end_measure,
+                imported_score_info,
+            ],
+        )
+        imported_part.input(
+            fn=change_imported_part,
+            inputs=[imported_score_state, imported_part],
+            outputs=[
+                imported_verse,
+                imported_start_measure,
+                imported_end_measure,
+                imported_score_info,
+            ],
+        )
+        load_imported_btn.click(
+            fn=load_imported_score,
+            inputs=[
+                imported_score_state,
+                imported_part,
+                imported_verse,
+                imported_start_measure,
+                imported_end_measure,
+                lyrics_str,
+            ],
+            outputs=[lyrics_str, score_rows, bpm, preset_info],
         )
 
         status_out = gr.Markdown("")

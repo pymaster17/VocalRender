@@ -10,3 +10,5 @@ safetensors
 accelerate
 pydantic
 datasets
+defusedxml>=0.7.1
+music21>=10.5,<11
