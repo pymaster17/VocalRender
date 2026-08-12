@@ -587,6 +587,7 @@ with gr.Blocks(elem_id="col-container") as demo:
             value=DEFAULT_CKPT_VARIANT,
             label="Model checkpoint",
             info="VocalRender-Pro is selected by default; switch to VocalRender to compare the base checkpoint.",
+            interactive=True,
         )
 
         with gr.Accordion("Preview the six included voices", open=False):
@@ -612,6 +613,7 @@ with gr.Blocks(elem_id="col-container") as demo:
             value="Alto-1",
             label="1. Choose a voice reference",
             info="Use an included singing voice, or choose Upload my own voice below.",
+            interactive=True,
         )
 
         with gr.Row():
@@ -619,6 +621,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 label="Optional upload (2–8 seconds of clean singing)",
                 type="filepath",
                 format="wav",
+                interactive=True,
             )
 
         with gr.Row():
