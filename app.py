@@ -501,6 +501,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                         value=row["pitch"],
                         step=1,
                         label="Pitch",
+                        interactive=True,
                         scale=3,
                         key=f"score-pitch-{index}",
                     )
@@ -508,6 +509,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                         choices=NOTE_OPTIONS,
                         value=row["note"],
                         label="Note duration",
+                        interactive=True,
                         scale=2,
                         key=f"score-note-{index}",
                     )
