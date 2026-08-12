@@ -19,10 +19,11 @@ Score-native singing voice synthesis (SVS) model that generates 48 kHz singing a
 
 VocalRender turns a written vocal part into a sung audio performance. You give it:
 
-1. one of the six included GTSinger references (`Alto-1/2/3` or `Tenor-1/2/3`), or a short recording that demonstrates the desired vocal color;
-2. the lyrics, which the app splits into editable sung units;
-3. one or more MIDI pitches and note durations for each lyric unit;
-4. the tempo.
+1. a model checkpoint (`VocalRender-Pro` by default, or the base `VocalRender` checkpoint);
+2. one of the six included GTSinger references (`Alto-1/2/3` or `Tenor-1/2/3`), or a short recording that demonstrates the desired vocal color;
+3. the lyrics, which the app splits into editable sung units;
+4. one or more MIDI pitches and note durations for each lyric unit;
+5. the tempo.
 
 It then generates a new vocal performance at 48 kHz. The reference recording provides the
 voice character and does not need to contain the same lyrics or melody. This research demo
@@ -52,6 +53,9 @@ The music-notation icons use Steinberg's professional
 
 Based on [pymaster/VocalRender](https://huggingface.co/pymaster/VocalRender) — an autoregressive diffusion model initialized from VoxCPM2 speech-pretrained weights.
 
+The demo includes a checkpoint selector for both `VocalRender-Pro` and `VocalRender`, with
+`VocalRender-Pro` selected by default.
+
 - **Paper**: [arXiv:2607.27768](https://arxiv.org/abs/2607.27768)
 - **Code**: [github.com/pymaster17/VocalRender](https://github.com/pymaster17/VocalRender)
 - **License**: Apache 2.0
@@ -62,4 +66,4 @@ Based on [pymaster/VocalRender](https://huggingface.co/pymaster/VocalRender) —
 - **Pitches**: MIDI note numbers (0-127, comma-separated; middle C is 60 and 0 means a rest)
 - **Notes**: Duration tokens (`<NOTE_4>` is a quarter note, `<NOTE_8>` is an eighth note, and dotted variants use `DOT`)
 - **BPM**: Beats per minute
-- **Voice reference**: choose one of three included voices, or upload a 2-8 second singing clip for the target voice timbre
+- **Voice reference**: choose one of six included voices, or upload a 2-8 second singing clip for the target voice timbre

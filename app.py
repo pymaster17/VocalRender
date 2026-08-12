@@ -24,7 +24,8 @@ from einops import rearrange
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 MODEL_ID = "pymaster/VocalRender"
-CKPT_VARIANT = "VocalRender"  # base variant (not Pro)
+CKPT_VARIANTS = ("VocalRender-Pro", "VocalRender")
+DEFAULT_CKPT_VARIANT = "VocalRender-Pro"
 
 # ---------------------------------------------------------------------------
 # Model loading (module scope, as required by ZeroGPU)
@@ -73,41 +74,47 @@ def _load_model(ckpt_dir: str, device: str = "cuda"):
     return model
 
 
-def _download_model():
-    """Download model weights from HF Hub to a local directory."""
+def _download_models():
+    """Download both selectable model checkpoints from HF Hub."""
     from huggingface_hub import snapshot_download
     local_dir = snapshot_download(
         repo_id=MODEL_ID,
-        allow_patterns=[f"{CKPT_VARIANT}/*"],
+        allow_patterns=[f"{variant}/*" for variant in CKPT_VARIANTS],
         repo_type="model",
     )
-    return os.path.join(local_dir, CKPT_VARIANT)
+    return {
+        variant: os.path.join(local_dir, variant)
+        for variant in CKPT_VARIANTS
+    }
 
 
-print("[VocalRender] Downloading model weights...", file=sys.stderr)
-_CKPT_DIR = _download_model()
-print(f"[VocalRender] Model downloaded to: {_CKPT_DIR}", file=sys.stderr)
+print("[VocalRender] Downloading model checkpoints...", file=sys.stderr)
+_CKPT_DIRS = _download_models()
+print(f"[VocalRender] Models downloaded to: {_CKPT_DIRS}", file=sys.stderr)
 
-print("[VocalRender] Loading model...", file=sys.stderr)
-model = _load_model(_CKPT_DIR, device="cuda")
-print("[VocalRender] Model loaded on cuda", file=sys.stderr)
+models = {}
+for _variant in CKPT_VARIANTS:
+    print(f"[VocalRender] Loading {_variant}...", file=sys.stderr)
+    models[_variant] = _load_model(_CKPT_DIRS[_variant], device="cuda")
+    print(f"[VocalRender] {_variant} loaded on cuda", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
 # SVS prompt building (mirrors infer_vocalrender_svs_single.py)
 # ---------------------------------------------------------------------------
 
-_cached_preprocessor = None
+_cached_preprocessors = {}
 
 def _get_preprocessor(model):
-    global _cached_preprocessor
-    if _cached_preprocessor is not None:
-        return _cached_preprocessor
+    cache_key = id(model)
+    if cache_key in _cached_preprocessors:
+        return _cached_preprocessors[cache_key]
     from vocalrender.preprocessing import create_lightweight_preprocessor
-    _cached_preprocessor = create_lightweight_preprocessor(
+    preprocessor = create_lightweight_preprocessor(
         model.text_tokenizer.tokenizer,
     )
-    return _cached_preprocessor
+    _cached_preprocessors[cache_key] = preprocessor
+    return preprocessor
 
 
 def _build_svs_prompt(entry: Dict, model) -> str:
@@ -194,6 +201,7 @@ def _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm):
 
 
 def _generate_impl(
+    checkpoint: str,
     voice_preset: str,
     prompt_audio,
     lyrics_str: str,
@@ -210,6 +218,7 @@ def _generate_impl(
     """Generate singing voice from lyrics, MIDI pitches, and a prompt audio clip.
 
     Args:
+        checkpoint: Selected VocalRender checkpoint variant.
         voice_preset: An included example voice, or the option to upload a custom voice.
         prompt_audio: A clean 2-8 second singing audio clip (wav) providing the target timbre.
         lyrics_str: Pipe-separated lyrics syllables (e.g. "我|的|孤|独").
@@ -223,6 +232,10 @@ def _generate_impl(
         max_len: Maximum generation length in patches.
     """
     t0 = time.perf_counter()
+
+    model = models.get(checkpoint)
+    if model is None:
+        raise gr.Error(f"Unknown model checkpoint: {checkpoint}")
 
     preset_path = VOICE_PRESETS.get(voice_preset)
     if preset_path:
@@ -508,6 +521,7 @@ def _delete_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -
 @spaces.GPU(duration=60)
 def generate_from_word_score(
     rows,
+    checkpoint,
     voice,
     uploaded_audio,
     tempo,
@@ -528,6 +542,7 @@ def generate_from_word_score(
     words = [words_by_index[index] for index in sorted(words_by_index)]
     pitch2word = [row["word_index"] for row in rows]
     return _generate_impl(
+        checkpoint,
         voice,
         uploaded_audio,
         "|".join(words),
@@ -567,6 +582,13 @@ with gr.Blocks(elem_id="col-container") as demo:
         )
 
     with gr.Column(elem_id="col-container"):
+        checkpoint = gr.Radio(
+            choices=list(CKPT_VARIANTS),
+            value=DEFAULT_CKPT_VARIANT,
+            label="Model checkpoint",
+            info="VocalRender-Pro is selected by default; switch to VocalRender to compare the base checkpoint.",
+        )
+
         with gr.Accordion("Preview the six included voices", open=False):
             gr.Markdown("**Alto references**")
             with gr.Row():
@@ -724,6 +746,7 @@ with gr.Blocks(elem_id="col-container") as demo:
 
             easy_inputs = [
                 score_rows,
+                checkpoint,
                 voice_preset,
                 prompt_audio,
                 bpm,
