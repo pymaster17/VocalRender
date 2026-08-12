@@ -526,22 +526,11 @@ with gr.Blocks(elem_id="col-container") as demo:
             )
 
         split_btn = gr.Button("Create word-by-word score")
-        score_rows = gr.State(_easy_rows_from_example(EXAMPLES[0]))
-
-        with gr.Row():
-            bpm = gr.Number(label="4. Tempo (BPM)", value=64, precision=0)
-
-        with gr.Accordion("Advanced settings", open=False):
-            with gr.Row():
-                cfg_value = gr.Slider(0.5, 5.0, value=2.0, step=0.1, label="CFG value")
-                inference_timesteps = gr.Slider(1, 50, value=10, step=1, label="Inference timesteps")
-                temperature = gr.Slider(0.1, 2.0, value=1.0, step=0.1, label="Temperature")
-                max_len = gr.Slider(100, 3000, value=2000, step=100, label="Max length (patches)")
+        score_rows = gr.State([])
 
         @gr.render(inputs=score_rows)
         def render_word_score(rows):
             if not rows:
-                gr.Markdown("Enter lyrics and press **Create word-by-word score**.")
                 return
 
             gr.Markdown(
@@ -647,7 +636,6 @@ with gr.Blocks(elem_id="col-container") as demo:
                     key=f"delete-melisma-{rows[index]['uid']}",
                 )
 
-            easy_run_btn = gr.Button("Generate Singing", variant="primary", key="easy-generate")
             easy_inputs = [
                 voice_preset,
                 prompt_audio,
@@ -692,6 +680,18 @@ with gr.Blocks(elem_id="col-container") as demo:
                 outputs=[audio_out, status_out, prompt_out],
                 key="generate-word-score",
             )
+
+        with gr.Row():
+            bpm = gr.Number(label="4. Tempo (BPM)", value=64, precision=0)
+
+        with gr.Accordion("Advanced settings", open=False):
+            with gr.Row():
+                cfg_value = gr.Slider(0.5, 5.0, value=2.0, step=0.1, label="CFG value")
+                inference_timesteps = gr.Slider(1, 50, value=10, step=1, label="Inference timesteps")
+                temperature = gr.Slider(0.1, 2.0, value=1.0, step=0.1, label="Temperature")
+                max_len = gr.Slider(100, 3000, value=2000, step=100, label="Max length (patches)")
+
+        easy_run_btn = gr.Button("Generate Singing", variant="primary")
 
         split_btn.click(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
         lyrics_str.submit(_score_rows_from_lyrics, inputs=lyrics_str, outputs=score_rows)
