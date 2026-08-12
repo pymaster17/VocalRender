@@ -21,7 +21,7 @@ VocalRender turns a written vocal part into a sung audio performance. You give i
 
 1. one of the three included example voices, or a short recording that demonstrates the desired vocal color;
 2. the lyrics, which the app splits into editable sung units;
-3. one MIDI pitch and note duration for each lyric unit;
+3. one or more MIDI pitches and note durations for each lyric unit;
 4. the tempo.
 
 It then generates a new vocal performance at 48 kHz. The reference recording provides the
@@ -29,9 +29,10 @@ voice character and does not need to contain the same lyrics or melody. This res
 supports Chinese lyrics only. Inputs containing other languages are rejected before inference.
 
 For the normal workflow, type Chinese lyrics and press **Create word-by-word score**. The lyrics
-are split character by character. Then use the pitch slider and note-duration menu beside each
-lyric unit. You do not need to understand the model architecture or write code. Other languages
-are rejected because the released checkpoint was trained only on Chinese lyrics.
+are split character by character. Type a MIDI pitch and use the note-duration slider beside each
+lyric unit. If a syllable spans multiple notes, press **+ Melisma note** and edit every note
+independently. You do not need to understand the model architecture or write code. Other
+languages are rejected because the released checkpoint was trained only on Chinese lyrics.
 
 An advanced raw-score editor remains available for melismas, where one syllable is sung across
 multiple notes, and for direct use of VocalRender's native input format.

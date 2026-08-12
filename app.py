@@ -294,6 +294,25 @@ NOTE_OPTIONS = [
     "<NOTE_DOT_1>", "<NOTE_DOT_2>", "<NOTE_DOT_4>", "<NOTE_DOT_8>", "<NOTE_DOT_16>", "<NOTE_DOT_32>",
 ]
 
+# Longest to shortest, so the duration editor behaves naturally as a slider.
+NOTE_DURATION_OPTIONS = [
+    ("Dotted whole", "<NOTE_DOT_1>"),
+    ("Whole", "<NOTE_1>"),
+    ("Dotted half", "<NOTE_DOT_2>"),
+    ("Half", "<NOTE_2>"),
+    ("Dotted quarter", "<NOTE_DOT_4>"),
+    ("Quarter", "<NOTE_4>"),
+    ("Dotted eighth", "<NOTE_DOT_8>"),
+    ("Eighth", "<NOTE_8>"),
+    ("Dotted sixteenth", "<NOTE_DOT_16>"),
+    ("Sixteenth", "<NOTE_16>"),
+    ("Dotted thirty-second", "<NOTE_DOT_32>"),
+    ("Thirty-second", "<NOTE_32>"),
+]
+NOTE_TO_DURATION_INDEX = {
+    token: index for index, (_, token) in enumerate(NOTE_DURATION_OPTIONS)
+}
+
 VOICE_PRESETS = {
     "Included voice 1": "assets/2003000081.wav",
     "Included voice 2": "assets/2017000644.wav",
@@ -389,24 +408,68 @@ def _score_rows_from_lyrics(lyrics: str) -> List[Dict]:
     return [
         {
             "word": word,
+            "word_index": word_index,
+            "uid": f"{word_index}-0",
             "pitch": 0 if word.upper() == "SP" else 60,
-            "note": "<NOTE_4>",
+            "duration_index": NOTE_TO_DURATION_INDEX["<NOTE_4>"],
         }
-        for word in words
+        for word_index, word in enumerate(words)
     ]
 
 
 def _easy_rows_from_example(example: Dict) -> List[Dict]:
-    """Reduce a potentially melismatic example to one editable note per lyric unit."""
+    """Build editable rows while preserving every melisma note in an example."""
     words = _split_lyrics(example["lyrics"])
     pitches = [int(value) for value in example["pitches"].split(",")]
     notes = example["notes"].split(",")
     mapping = [int(value) for value in example["pitch2word"].split(",")]
     rows = []
-    for word_index, word in enumerate(words):
-        note_index = mapping.index(word_index) if word_index in mapping else min(word_index, len(pitches) - 1)
-        rows.append({"word": word, "pitch": pitches[note_index], "note": notes[note_index]})
+    occurrence = {}
+    for note_index, word_index in enumerate(mapping):
+        occurrence[word_index] = occurrence.get(word_index, 0) + 1
+        token = notes[note_index]
+        rows.append({
+            "word": words[word_index],
+            "word_index": word_index,
+            "uid": f"{word_index}-{occurrence[word_index] - 1}",
+            "pitch": pitches[note_index],
+            "duration_index": NOTE_TO_DURATION_INDEX[token],
+        })
     return rows
+
+
+def _sync_score_rows(rows: List[Dict], pitches, durations) -> List[Dict]:
+    synced = [dict(row) for row in rows]
+    for row, pitch, duration in zip(synced, pitches, durations):
+        row["pitch"] = int(pitch)
+        row["duration_index"] = int(round(duration))
+    return synced
+
+
+def _add_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -> List[Dict]:
+    rows = _sync_score_rows(rows, pitches, durations)
+    source = rows[row_index]
+    insert_at = max(
+        index for index, row in enumerate(rows)
+        if row["word_index"] == source["word_index"]
+    ) + 1
+    existing_ids = {row["uid"] for row in rows}
+    suffix = 1
+    while f"{source['word_index']}-{suffix}" in existing_ids:
+        suffix += 1
+    rows.insert(insert_at, {
+        **source,
+        "uid": f"{source['word_index']}-{suffix}",
+    })
+    return rows
+
+
+def _delete_melisma_note(rows: List[Dict], row_index: int, pitches, durations) -> List[Dict]:
+    rows = _sync_score_rows(rows, pitches, durations)
+    word_index = rows[row_index]["word_index"]
+    if sum(row["word_index"] == word_index for row in rows) <= 1:
+        raise gr.Error("Each lyric unit must keep at least one note.")
+    return rows[:row_index] + rows[row_index + 1:]
 
 with gr.Blocks(elem_id="col-container") as demo:
     gr.Markdown(
@@ -424,7 +487,8 @@ with gr.Blocks(elem_id="col-container") as demo:
             "1. **A voice reference:** choose an included voice, or upload 2–8 seconds of clean, unaccompanied singing.\n"
             "2. **Lyrics:** enter Chinese lyrics. They are split character by character; "
             "you can also use `|` to control the split. Other languages are not supported by this checkpoint.\n"
-            "3. **Melody and rhythm:** press **Create word-by-word score**, then set one pitch and note value for each lyric unit.\n"
+            "3. **Melody and rhythm:** press **Create word-by-word score**, then set pitch and duration. "
+            "Use **+ Melisma note** when one lyric unit spans multiple notes.\n"
             "4. **Generate:** choose the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.\n\n"
             "> This checkpoint supports Chinese lyrics only. Other languages are rejected before inference. Only upload a voice "
             "recording that you own or have permission to use."
@@ -482,39 +546,106 @@ with gr.Blocks(elem_id="col-container") as demo:
 
             gr.Markdown(
                 "### 3. Set pitch and duration for each lyric unit\n"
-                "Pitch uses MIDI numbers (60 = middle C/C4). Set pitch to 0 for a rest."
+                "Type a MIDI pitch directly (60 = middle C/C4; 0 = rest). "
+                "The duration slider runs from **0 = dotted whole** to **11 = thirty-second**.\n\n"
+                "`0 Dotted whole` · `1 Whole` · `2 Dotted half` · `3 Half` · "
+                "`4 Dotted quarter` · `5 Quarter` · `6 Dotted eighth` · `7 Eighth` · "
+                "`8 Dotted 16th` · `9 16th` · `10 Dotted 32nd` · `11 32nd`"
             )
             pitch_controls = []
-            note_controls = []
+            duration_controls = []
+            add_buttons = []
+            delete_buttons = []
+            word_note_counts = {
+                word_index: sum(row["word_index"] == word_index for row in rows)
+                for word_index in {row["word_index"] for row in rows}
+            }
             for index, row in enumerate(rows):
-                with gr.Row(key=f"score-row-{index}"):
+                uid = row["uid"]
+                with gr.Row(key=f"score-row-{uid}"):
                     gr.Textbox(
                         value=row["word"],
-                        label=f"Word {index + 1}",
+                        label=f"Lyric {row['word_index'] + 1}",
                         interactive=False,
                         scale=1,
-                        key=f"score-word-{index}",
+                        key=f"score-word-{uid}",
                     )
-                    pitch = gr.Slider(
+                    pitch = gr.Number(
                         minimum=0,
                         maximum=127,
                         value=row["pitch"],
-                        step=1,
-                        label="Pitch",
-                        interactive=True,
-                        scale=3,
-                        key=f"score-pitch-{index}",
-                    )
-                    note = gr.Dropdown(
-                        choices=NOTE_OPTIONS,
-                        value=row["note"],
-                        label="Note duration",
+                        precision=0,
+                        label="MIDI pitch",
                         interactive=True,
                         scale=2,
-                        key=f"score-note-{index}",
+                        key=f"score-pitch-{uid}",
+                    )
+                    duration = gr.Slider(
+                        minimum=0,
+                        maximum=len(NOTE_DURATION_OPTIONS) - 1,
+                        value=row["duration_index"],
+                        step=1,
+                        label="Note duration",
+                        interactive=True,
+                        scale=3,
+                        key=f"score-duration-{uid}",
+                    )
+                    duration_name = gr.Textbox(
+                        value=NOTE_DURATION_OPTIONS[row["duration_index"]][0],
+                        label="Selected duration",
+                        interactive=False,
+                        scale=2,
+                        key=f"score-duration-name-{uid}",
+                    )
+                    duration.change(
+                        lambda value: NOTE_DURATION_OPTIONS[int(round(value))][0],
+                        inputs=duration,
+                        outputs=duration_name,
+                        key=f"show-duration-{uid}",
+                    )
+                    add_button = gr.Button(
+                        "+ Melisma note",
+                        scale=1,
+                        key=f"score-add-{uid}",
+                    )
+                    delete_button = gr.Button(
+                        "Remove note",
+                        variant="stop",
+                        visible=word_note_counts[row["word_index"]] > 1,
+                        scale=1,
+                        key=f"score-delete-{uid}",
                     )
                     pitch_controls.append(pitch)
-                    note_controls.append(note)
+                    duration_controls.append(duration)
+                    add_buttons.append(add_button)
+                    delete_buttons.append(delete_button)
+
+            score_editor_inputs = [score_rows, *pitch_controls, *duration_controls]
+            for index, (add_button, delete_button) in enumerate(zip(add_buttons, delete_buttons)):
+                def add_note(current_rows, *values, row_index=index):
+                    count = len(current_rows)
+                    return _add_melisma_note(
+                        current_rows, row_index, values[:count], values[count:]
+                    )
+
+                def delete_note(current_rows, *values, row_index=index):
+                    count = len(current_rows)
+                    return _delete_melisma_note(
+                        current_rows, row_index, values[:count], values[count:]
+                    )
+
+                add_button.click(
+                    add_note,
+                    inputs=score_editor_inputs,
+                    outputs=score_rows,
+                    key=f"add-melisma-{rows[index]['uid']}",
+                )
+                delete_button.click(
+                    delete_note,
+                    inputs=score_editor_inputs,
+                    outputs=score_rows,
+                    key=f"delete-melisma-{rows[index]['uid']}",
+                )
 
             easy_run_btn = gr.Button("Generate Singing", variant="primary", key="easy-generate")
             easy_inputs = [
@@ -526,7 +657,7 @@ with gr.Blocks(elem_id="col-container") as demo:
                 temperature,
                 max_len,
                 *pitch_controls,
-                *note_controls,
+                *duration_controls,
             ]
 
             @spaces.GPU(duration=60)
@@ -534,15 +665,20 @@ with gr.Blocks(elem_id="col-container") as demo:
                 voice, uploaded_audio, tempo, cfg, steps, temp, length, *score_values = values
                 row_count = len(rows)
                 pitches = [int(value) for value in score_values[:row_count]]
-                notes = score_values[row_count:]
-                words = [row["word"] for row in rows]
+                duration_indices = [int(round(value)) for value in score_values[row_count:]]
+                notes = [NOTE_DURATION_OPTIONS[index][1] for index in duration_indices]
+                words_by_index = {}
+                for row in rows:
+                    words_by_index[row["word_index"]] = row["word"]
+                words = [words_by_index[index] for index in sorted(words_by_index)]
+                pitch2word = [row["word_index"] for row in rows]
                 return _generate_impl(
                     voice,
                     uploaded_audio,
                     "|".join(words),
                     ",".join(map(str, pitches)),
                     ",".join(notes),
-                    ",".join(map(str, range(row_count))),
+                    ",".join(map(str, pitch2word)),
                     tempo,
                     cfg,
                     steps,
@@ -562,8 +698,8 @@ with gr.Blocks(elem_id="col-container") as demo:
 
         with gr.Accordion("Advanced raw score input", open=False):
             gr.Markdown(
-                "Use this mode for melismas (multiple notes on one syllable), custom rests, "
-                "or direct editing of VocalRender's native score format."
+                "Use this mode for custom rests or direct editing of VocalRender's native score format. "
+                "The visual editor above now supports melismas."
             )
             pitches_str = gr.Textbox(
                 label="MIDI pitches",
