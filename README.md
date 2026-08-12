@@ -19,7 +19,7 @@ Score-native singing voice synthesis (SVS) model that generates 48 kHz singing a
 
 VocalRender turns a written vocal part into a sung audio performance. You give it:
 
-1. a short recording that demonstrates the desired vocal color;
+1. one of the three included example voices, or a short recording that demonstrates the desired vocal color;
 2. the lyrics, split into sung syllables;
 3. the melody as MIDI note numbers;
 4. the rhythm and tempo.
@@ -47,4 +47,4 @@ Based on [pymaster/VocalRender](https://huggingface.co/pymaster/VocalRender) —
 - **Pitches**: MIDI note numbers (0-127, comma-separated; middle C is 60 and 0 means a rest)
 - **Notes**: Duration tokens (`<NOTE_4>` is a quarter note, `<NOTE_8>` is an eighth note, and dotted variants use `DOT`)
 - **BPM**: Beats per minute
-- **Prompt audio**: 2-8 second singing clip for target voice timbre
+- **Voice reference**: choose one of three included voices, or upload a 2-8 second singing clip for the target voice timbre

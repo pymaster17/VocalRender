@@ -192,6 +192,7 @@ def _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm):
 
 @spaces.GPU(duration=60)
 def generate(
+    voice_preset: str,
     prompt_audio,
     lyrics_str: str,
     pitches_str: str,
@@ -207,6 +208,7 @@ def generate(
     """Generate singing voice from lyrics, MIDI pitches, and a prompt audio clip.
 
     Args:
+        voice_preset: An included example voice, or the option to upload a custom voice.
         prompt_audio: A clean 2-8 second singing audio clip (wav) providing the target timbre.
         lyrics_str: Pipe-separated lyrics syllables (e.g. "我|的|孤|独").
         pitches_str: Comma-separated MIDI pitch numbers (e.g. "65,64,64,65,67,65").
@@ -220,8 +222,13 @@ def generate(
     """
     t0 = time.perf_counter()
 
-    if prompt_audio is None:
-        return None, gr.Markdown("❌ Prompt audio is required. Please upload a 2-8 second singing clip."), ""
+    preset_path = VOICE_PRESETS.get(voice_preset)
+    if preset_path:
+        prompt_audio = preset_path
+    elif prompt_audio is None:
+        return None, gr.Markdown(
+            "❌ Choose one of the included voices, or upload a 2–8 second singing clip."
+        ), ""
 
     entry = _parse_input(lyrics_str, pitches_str, notes_str, pitch2word_str, bpm)
 
@@ -282,6 +289,13 @@ NOTE_OPTIONS = [
     "<NOTE_DOT_1>", "<NOTE_DOT_2>", "<NOTE_DOT_4>", "<NOTE_DOT_8>", "<NOTE_DOT_16>", "<NOTE_DOT_32>",
 ]
 
+VOICE_PRESETS = {
+    "Included voice 1": "assets/2003000081.wav",
+    "Included voice 2": "assets/2017000644.wav",
+    "Included voice 3": "assets/2044001666.wav",
+    "Upload my own voice": None,
+}
+
 # Predefined examples from the official repo
 EXAMPLES = [
     # Demo example from inference_input.json
@@ -292,6 +306,7 @@ EXAMPLES = [
         "pitch2word": "0,1,2,2,2,3,4,5,6",
         "bpm": 64,
         "prompt_audio": "assets/2003000081.wav",
+        "voice_preset": "Included voice 1",
     },
     # Opencpop demo entry 2003000087 (prompt audio 2003000081)
     {
@@ -301,6 +316,7 @@ EXAMPLES = [
         "pitch2word": "0,1,2,3,4,5,6,7,7,7,8,9,10,11,12,13,14,15,16,16,17",
         "bpm": 58,
         "prompt_audio": "assets/2003000081.wav",
+        "voice_preset": "Included voice 1",
     },
     # Opencpop demo entry 2017000646 (prompt audio 2017000644)
     {
@@ -310,6 +326,7 @@ EXAMPLES = [
         "pitch2word": "0,1,2,3,4,5,5,6,7,8,8,8,8,9",
         "bpm": 70,
         "prompt_audio": "assets/2017000644.wav",
+        "voice_preset": "Included voice 2",
     },
 ]
 
@@ -326,7 +343,7 @@ with gr.Blocks(elem_id="col-container") as demo:
     with gr.Accordion("New here? Read this musician-friendly guide", open=True):
         gr.Markdown(
             "### What you need\n"
-            "1. **A voice reference:** upload 2–8 seconds of clean, unaccompanied singing.\n"
+            "1. **A voice reference:** choose an included voice, or upload 2–8 seconds of clean, unaccompanied singing.\n"
             "2. **Lyrics:** separate sung syllables with `|`. Use `SP` for a rest or breath.\n"
             "3. **Melody:** enter MIDI note numbers. For reference, middle C is 60; use 0 for a rest.\n"
             "4. **Rhythm and tempo:** choose a duration for each note and enter the song's BPM.\n\n"
@@ -337,9 +354,25 @@ with gr.Blocks(elem_id="col-container") as demo:
         )
 
     with gr.Column(elem_id="col-container"):
+        with gr.Accordion("Preview the three included voices", open=False):
+            with gr.Row():
+                for preset_name, preset_path in list(VOICE_PRESETS.items())[:3]:
+                    gr.Audio(
+                        value=preset_path,
+                        label=preset_name,
+                        interactive=False,
+                    )
+
+        voice_preset = gr.Radio(
+            choices=list(VOICE_PRESETS),
+            value="Included voice 1",
+            label="1. Choose a voice reference",
+            info="Use an included singing voice, or choose Upload my own voice below.",
+        )
+
         with gr.Row():
             prompt_audio = gr.Audio(
-                label="1. Voice reference (2–8 seconds of clean singing)",
+                label="Optional upload (2–8 seconds of clean singing)",
                 type="filepath",
                 format="wav",
             )
@@ -386,7 +419,7 @@ with gr.Blocks(elem_id="col-container") as demo:
     # Wire the button
     run_btn.click(
         fn=generate,
-        inputs=[prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm,
+        inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm,
                 cfg_value, inference_timesteps, temperature, max_len],
         outputs=[audio_out, status_out, prompt_out],
     )
@@ -394,14 +427,11 @@ with gr.Blocks(elem_id="col-container") as demo:
     # Examples
     gr.Examples(
         examples=[
-            [e["prompt_audio"], e["lyrics"], e["pitches"], e["notes"], e["pitch2word"], e["bpm"]]
+            [e["voice_preset"], None, e["lyrics"], e["pitches"], e["notes"], e["pitch2word"], e["bpm"]]
             for e in EXAMPLES
         ],
-        inputs=[prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm],
-        outputs=[audio_out, status_out, prompt_out],
-        fn=generate,
-        cache_examples=True,
-        cache_mode="lazy",
+        inputs=[voice_preset, prompt_audio, lyrics_str, pitches_str, notes_str, pitch2word_str, bpm],
+        label="Ready-to-use score examples",
     )
 
 demo.launch(mcp_server=True, theme=gr.themes.Citrus(), css=CSS)
