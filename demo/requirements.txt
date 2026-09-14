@@ -1,0 +1,16 @@
+gradio[mcp]==6.15.1
+huggingface_hub
+torch
+torchaudio
+transformers
+einops
+numpy
+scipy
+soundfile
+librosa
+safetensors
+accelerate
+pydantic
+datasets
+defusedxml>=0.7.1
+music21>=10.5,<11

@@ -1,0 +1,54 @@
+<div class="vr-roll" tabindex="0" aria-label="Piano roll score editor">
+  <div class="vr-toolbar">
+    <div class="vr-group vr-transport">
+      <button type="button" class="vr-btn vr-play" data-action="play" title="播放 / 停止旋律试听 Play / stop melody preview (Space)">▶ 试听 Play</button>
+      <button type="button" class="vr-btn" data-action="stop" title="停止 Stop">■</button>
+      <label class="vr-field" title="速度 Tempo">BPM <input type="number" class="vr-input vr-bpm" data-field="bpm" min="1" max="255" step="1"></label>
+      <label class="vr-field" title="拍号（仅影响网格）Meter (grid only)">拍号 Meter
+        <select class="vr-input vr-meter" data-field="meter">
+          <option value="4">4/4</option>
+          <option value="3">3/4</option>
+          <option value="2">2/4</option>
+          <option value="6">6/8</option>
+        </select>
+      </label>
+    </div>
+    <div class="vr-group vr-tools" role="radiogroup" aria-label="Tool">
+      <button type="button" class="vr-btn vr-tool active" data-tool="select" title="选择 / 拖动 Select (V)">↖ 选择 Select</button>
+      <button type="button" class="vr-btn vr-tool" data-tool="pencil" title="铅笔：点击添加音符 Pencil (B)">✎ 铅笔 Draw</button>
+      <button type="button" class="vr-btn vr-tool" data-tool="eraser" title="橡皮：点击删除 Eraser (E)">⌫ 橡皮 Erase</button>
+    </div>
+    <div class="vr-group vr-edit">
+      <button type="button" class="vr-btn" data-action="add-note" title="在选中音符后插入音符 Insert note after selection (N)">+ 音符 Note</button>
+      <button type="button" class="vr-btn" data-action="add-rest" title="在选中音符后插入休止 Insert rest after selection (R)">+ 休止 Rest</button>
+      <button type="button" class="vr-btn" data-action="melisma" title="为选中的字增加一个延音音符 Add melisma note (M)">+ 延音 Melisma</button>
+      <button type="button" class="vr-btn vr-danger" data-action="delete" title="删除选中 Delete selection (Del)">删除 Delete</button>
+    </div>
+    <div class="vr-group vr-history">
+      <button type="button" class="vr-btn" data-action="undo" title="撤销 Undo (Ctrl+Z)">↶</button>
+      <button type="button" class="vr-btn" data-action="redo" title="重做 Redo (Ctrl+Y)">↷</button>
+      <button type="button" class="vr-btn" data-action="zoom-out" title="缩小 Zoom out (-)">−</button>
+      <button type="button" class="vr-btn" data-action="zoom-in" title="放大 Zoom in (+)">+</button>
+    </div>
+  </div>
+  <div class="vr-inspector">
+    <span class="vr-inspector-title">选中音符 Selected</span>
+    <label class="vr-field">歌词 Lyric <input type="text" class="vr-input vr-lyric" data-field="lyric" maxlength="8" placeholder="字 / - / SP"></label>
+    <label class="vr-field">音高 Pitch <input type="number" class="vr-input vr-pitch" data-field="pitch" min="0" max="127" step="1"></label>
+    <span class="vr-pitch-name"></span>
+    <label class="vr-field">时值 Length <select class="vr-input vr-duration" data-field="duration"></select></label>
+    <span class="vr-duration-glyph bravura-note" aria-hidden="true"></span>
+    <span class="vr-inspector-empty">未选中音符 — 点击音符或使用铅笔添加 · No note selected — click a note or draw one</span>
+  </div>
+  <div class="vr-body">
+    <div class="vr-corner"><span>休止 Rest</span></div>
+    <div class="vr-ruler-wrap"><div class="vr-ruler"><div class="vr-bars"></div><div class="vr-rests"></div></div></div>
+    <div class="vr-keys-wrap"><div class="vr-keys"></div></div>
+    <div class="vr-grid-wrap"><div class="vr-grid"><div class="vr-restcols"></div><div class="vr-notes"></div><div class="vr-playhead"></div><div class="vr-end"></div></div></div>
+  </div>
+  <div class="vr-footer">
+    <span class="vr-counts"></span>
+    <span class="vr-message"></span>
+    <span class="vr-hint">拖动=改音高 · 拖右缘=改时值 · 双击=改歌词（“-”延音，SP 休止）· ↑↓ 移调 · [ ] 时值 &nbsp;|&nbsp; drag = pitch · drag edge = length · double-click = lyric ("-" continuation, SP rest)</span>
+  </div>
+</div>

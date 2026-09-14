@@ -1,0 +1,785 @@
+/*
+ * VocalRender piano roll widget. Runs inside gr.HTML's js_on_load with
+ * `element`, `props`, `trigger` and `watch` in scope; the score model
+ * (VocalRenderScoreModel) is concatenated in front of this file.
+ *
+ * props.value = {rows, bpm, beats_per_bar}; JS commits a deep copy after every
+ * completed edit, Python replaces it through watch("value").
+ */
+(function () {
+  "use strict";
+  const M = VocalRenderScoreModel;
+  const root = element.querySelector(".vr-roll");
+  if (!root) return;
+
+  const ROW_H = 16;
+  const TOP_PITCH = 108;
+  const BOTTOM_PITCH = 21;
+  const ROWS = TOP_PITCH - BOTTOM_PITCH + 1;
+  const GRID_H = ROWS * ROW_H;
+  const ZOOM_LEVELS = [1.5, 2, 3, 4, 6, 8];
+  const TAIL_TICKS = 8 * M.TICKS_PER_QUARTER;
+  const BLACK = new Set([1, 3, 6, 8, 10]);
+  const GLYPHS = { 1: "𝅝", 2: "𝅗𝅥", 4: "𝅘𝅥", 8: "𝅘𝅥𝅮", 16: "𝅘𝅥𝅯", 32: "𝅘𝅥𝅰" };
+
+  const el = {
+    toolbar: root.querySelector(".vr-toolbar"),
+    play: root.querySelector(".vr-play"),
+    bpm: root.querySelector(".vr-bpm"),
+    meter: root.querySelector(".vr-meter"),
+    inspector: root.querySelector(".vr-inspector"),
+    lyric: root.querySelector(".vr-lyric"),
+    pitch: root.querySelector(".vr-pitch"),
+    pitchName: root.querySelector(".vr-pitch-name"),
+    duration: root.querySelector(".vr-duration"),
+    glyph: root.querySelector(".vr-duration-glyph"),
+    ruler: root.querySelector(".vr-ruler"),
+    bars: root.querySelector(".vr-bars"),
+    rests: root.querySelector(".vr-rests"),
+    keys: root.querySelector(".vr-keys"),
+    gridWrap: root.querySelector(".vr-grid-wrap"),
+    grid: root.querySelector(".vr-grid"),
+    restcols: root.querySelector(".vr-restcols"),
+    notes: root.querySelector(".vr-notes"),
+    playhead: root.querySelector(".vr-playhead"),
+    end: root.querySelector(".vr-end"),
+    counts: root.querySelector(".vr-counts"),
+    message: root.querySelector(".vr-message"),
+    undo: root.querySelector('[data-action="undo"]'),
+    redo: root.querySelector('[data-action="redo"]'),
+    melisma: root.querySelector('[data-action="melisma"]'),
+    del: root.querySelector('[data-action="delete"]'),
+  };
+
+  const state = {
+    rows: [],
+    bpm: 64,
+    beatsPerBar: 4,
+    selected: new Set(),
+    tool: "select",
+    zoom: 4, // index into ZOOM_LEVELS (6 px per 64th note)
+    undo: [],
+    redo: [],
+    drag: null,
+    audio: null,
+    playing: null,
+    message: null,
+    lastClick: null,
+  };
+
+  // ------------------------------------------------------------------ utils
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const ppt = () => ZOOM_LEVELS[state.zoom];
+  const pitchTop = (pitch) => (TOP_PITCH - Math.min(TOP_PITCH, Math.max(BOTTOM_PITCH, pitch))) * ROW_H;
+  const pitchFromY = (y) => Math.max(BOTTOM_PITCH, Math.min(TOP_PITCH, TOP_PITCH - Math.floor(y / ROW_H)));
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const selectedIndices = () => state.rows.map((r, i) => (state.selected.has(r.uid) ? i : -1)).filter((i) => i >= 0);
+  const firstSelected = () => { const s = selectedIndices(); return s.length ? s[0] : -1; };
+  const lastSelected = () => { const s = selectedIndices(); return s.length ? s[s.length - 1] : -1; };
+  const isDark = () => !!(document.querySelector(".dark") || (document.body && document.body.classList.contains("dark")));
+
+  function normalizeValue(value) {
+    const v = value && typeof value === "object" ? value : {};
+    return {
+      rows: Array.isArray(v.rows) ? clone(v.rows) : [],
+      bpm: Number.isFinite(Number(v.bpm)) ? Number(v.bpm) : 64,
+      beatsPerBar: [2, 3, 4, 6].includes(Number(v.beats_per_bar)) ? Number(v.beats_per_bar) : 4,
+    };
+  }
+
+  function currentValue() {
+    return { rows: clone(state.rows), bpm: state.bpm, beats_per_bar: state.beatsPerBar };
+  }
+
+  /** Push the current state to the undo stack and publish it to Gradio. */
+  function commit(nextRows, extra) {
+    const before = currentValue();
+    state.undo.push(before);
+    if (state.undo.length > 100) state.undo.shift();
+    state.redo = [];
+    if (nextRows) state.rows = nextRows;
+    if (extra && extra.bpm !== undefined) state.bpm = extra.bpm;
+    if (extra && extra.beatsPerBar !== undefined) state.beatsPerBar = extra.beatsPerBar;
+    pruneSelection();
+    publish();
+    render();
+  }
+
+  function publish() {
+    props.value = currentValue();
+  }
+
+  function pruneSelection() {
+    const uids = new Set(state.rows.map((r) => r.uid));
+    for (const uid of Array.from(state.selected)) if (!uids.has(uid)) state.selected.delete(uid);
+  }
+
+  function setMessage(problem, ok) {
+    state.message = problem ? (problem.zh ? `${problem.zh} ${problem.en}` : String(problem)) : null;
+    el.message.textContent = state.message || "";
+    el.message.classList.toggle("ok", !!ok);
+  }
+
+  function loadFromProps() {
+    const v = normalizeValue(props.value);
+    state.rows = v.rows;
+    state.bpm = v.bpm;
+    state.beatsPerBar = v.beatsPerBar;
+    state.selected.clear();
+    state.undo = [];
+    state.redo = [];
+    stopPlayback();
+    setMessage(null);
+    render();
+    scrollToNotes();
+  }
+
+  // --------------------------------------------------------------- rendering
+  function buildKeys() {
+    const parts = [];
+    for (let pitch = TOP_PITCH; pitch >= BOTTOM_PITCH; pitch -= 1) {
+      const black = BLACK.has(pitch % 12);
+      const isC = pitch % 12 === 0;
+      parts.push(
+        `<div class="vr-key ${black ? "black" : "white"}${isC ? " c" : ""}" data-pitch="${pitch}" style="top:${pitchTop(pitch)}px">${isC || !black ? M.midiName(pitch) : ""}</div>`,
+      );
+    }
+    el.keys.innerHTML = parts.join("");
+    el.keys.style.height = `${GRID_H}px`;
+  }
+
+  function gridBackground() {
+    // Octave row shading (top row of each 12-row block is C).
+    const stops = [];
+    for (let i = 0; i < 12; i += 1) {
+      const pitchClass = (12 - i) % 12; // C, B, A#, ... C#
+      const color = BLACK.has(pitchClass) ? "var(--vr-black-row)" : "var(--vr-white-row)";
+      stops.push(`${color} ${i * ROW_H}px ${(i + 1) * ROW_H}px`);
+    }
+    const rowsLayer = `linear-gradient(to bottom, ${stops.join(", ")})`;
+    const beatPx = M.TICKS_PER_BEAT * ppt();
+    const barPx = beatPx * state.beatsPerBar;
+    const beats = `repeating-linear-gradient(to right, var(--vr-beat-line) 0 1px, transparent 1px ${beatPx}px)`;
+    const bars = `repeating-linear-gradient(to right, var(--vr-bar-line) 0 1px, transparent 1px ${barPx}px)`;
+    const octaveLines = `repeating-linear-gradient(to bottom, var(--vr-c-line) 0 1px, transparent 1px ${12 * ROW_H}px)`;
+    const rowLines = `repeating-linear-gradient(to bottom, var(--vr-beat-line) 0 1px, transparent 1px ${ROW_H}px)`;
+    el.grid.style.backgroundImage = [bars, beats, octaveLines, rowLines, rowsLayer].join(", ");
+    el.grid.style.backgroundSize = `${barPx}px 100%, ${beatPx}px 100%, 100% ${12 * ROW_H}px, 100% ${ROW_H}px, 100% ${12 * ROW_H}px`;
+    el.grid.style.backgroundPosition = `-1px 0, -1px 0, 0 ${ROW_H - 1}px, 0 ${ROW_H - 1}px, 0 0`;
+  }
+
+  const handleWidth = (w) => (w >= 24 ? 7 : Math.max(2, Math.floor(w / 3)));
+
+  function render() {
+    root.classList.toggle("vr-dark", isDark());
+    const events = M.layout(state.rows);
+    const total = M.totalTicks(state.rows);
+    const scale = ppt();
+    const width = Math.max((total + TAIL_TICKS) * scale, el.gridWrap.clientWidth || 600);
+    el.grid.style.width = `${width}px`;
+    el.grid.style.height = `${GRID_H}px`;
+    el.ruler.style.width = `${width}px`;
+    el.grid.className = `vr-grid ${state.tool}`;
+    gridBackground();
+
+    // Bar numbers.
+    const barTicks = M.TICKS_PER_BEAT * state.beatsPerBar;
+    const barCount = Math.ceil(width / (barTicks * scale)) + 1;
+    const bars = [];
+    for (let bar = 0; bar < barCount; bar += 1) bars.push(`<div class="vr-bar" style="left:${bar * barTicks * scale}px">${bar + 1}</div>`);
+    el.bars.innerHTML = bars.join("");
+
+    // Notes, rests and rest columns.
+    const notes = [];
+    const rests = [];
+    const cols = [];
+    for (const ev of events) {
+      const left = ev.start * scale;
+      const w = Math.max(ev.ticks * scale - 1, 3);
+      const sel = state.selected.has(ev.uid) ? " selected" : "";
+      if (ev.isRest) {
+        rests.push(`<div class="vr-rest${sel}" data-index="${ev.index}" data-uid="${escapeHtml(ev.uid)}" style="left:${left}px;width:${w}px" title="休止 Rest ${M.DURATIONS[state.rows[ev.index].duration_index].zh}">SP<div class="vr-handle" data-index="${ev.index}" style="width:${handleWidth(w)}px"></div></div>`);
+        cols.push(`<div class="vr-restcol" style="left:${left}px;width:${ev.ticks * scale}px"></div>`);
+      } else {
+        const d = M.DURATIONS[M.clampDurationIndex(state.rows[ev.index].duration_index)];
+        const title = `${escapeHtml(ev.word)} · ${M.midiName(ev.pitch)} (${ev.pitch}) · ${d.zh} ${d.en}`;
+        notes.push(
+          `<div class="vr-note${ev.isHead ? "" : " continuation"}${sel}" data-index="${ev.index}" data-uid="${escapeHtml(ev.uid)}" style="left:${left}px;top:${pitchTop(ev.pitch)}px;width:${w}px" title="${title}">${escapeHtml(ev.lyric)}<div class="vr-handle" data-index="${ev.index}" style="width:${handleWidth(w)}px"></div></div>`,
+        );
+      }
+    }
+    el.notes.innerHTML = notes.join("");
+    el.rests.innerHTML = rests.join("");
+    el.restcols.innerHTML = cols.join("");
+    el.end.style.left = `${total * scale}px`;
+
+    // Keyboard highlight for selected pitches.
+    const selectedPitches = new Set(selectedIndices().map((i) => state.rows[i].pitch));
+    el.keys.querySelectorAll(".vr-key").forEach((key) => key.classList.toggle("highlight", selectedPitches.has(Number(key.dataset.pitch))));
+
+    renderInspector();
+    renderFooter();
+    el.bpm.value = state.bpm;
+    el.meter.value = String(state.beatsPerBar);
+    el.undo.disabled = state.undo.length === 0;
+    el.redo.disabled = state.redo.length === 0;
+    const sel = selectedIndices();
+    el.del.disabled = sel.length === 0;
+    el.melisma.disabled = !sel.some((i) => !M.isRest(state.rows[i]));
+  }
+
+  function renderInspector() {
+    const index = firstSelected();
+    el.inspector.classList.toggle("empty", index < 0);
+    if (index < 0) return;
+    const row = state.rows[index];
+    const events = M.layout(state.rows);
+    if (document.activeElement !== el.lyric) el.lyric.value = events[index].lyric;
+    if (document.activeElement !== el.pitch) el.pitch.value = row.pitch;
+    el.pitch.disabled = M.isRest(row);
+    el.lyric.disabled = false;
+    el.pitchName.textContent = M.midiName(row.pitch);
+    el.duration.value = String(row.duration_index);
+    const d = M.DURATIONS[M.clampDurationIndex(row.duration_index)];
+    const denominator = Number(d.key.replace(".", ""));
+    el.glyph.textContent = GLYPHS[denominator] + (d.key.endsWith(".") ? "\uE1E7" : "");
+  }
+
+  function renderFooter() {
+    const c = M.counts(state.rows);
+    el.counts.textContent = `事件 Events ${c.events}/${M.MAX_EVENTS} · 字 Words ${c.words}/${M.MAX_WORDS} · 时长 Length ${formatSeconds(M.totalTicks(state.rows))}`;
+    const problems = M.validate(state.rows, state.bpm);
+    el.counts.classList.toggle("over", problems.some((p) => p.en.includes("Too many")));
+    if (!state.message) {
+      const p = problems.find((x) => !x.en.includes("empty"));
+      el.message.textContent = p ? `${p.zh} ${p.en}` : "";
+      el.message.classList.remove("ok");
+    }
+  }
+
+  function formatSeconds(ticks) {
+    const seconds = (ticks / M.TICKS_PER_QUARTER) * (60 / Math.max(1, state.bpm));
+    return `${seconds.toFixed(1)}s`;
+  }
+
+  function scrollToNotes() {
+    const pitched = state.rows.filter((r) => !M.isRest(r)).map((r) => r.pitch);
+    const center = pitched.length ? pitched.reduce((a, b) => a + b, 0) / pitched.length : 64;
+    el.gridWrap.scrollTop = Math.max(0, pitchTop(Math.round(center)) - el.gridWrap.clientHeight / 2);
+    el.gridWrap.scrollLeft = 0;
+    syncScroll();
+  }
+
+  function syncScroll() {
+    el.ruler.style.transform = `translateX(${-el.gridWrap.scrollLeft}px)`;
+    el.keys.style.transform = `translateY(${-el.gridWrap.scrollTop}px)`;
+  }
+
+  function ensureVisible(index) {
+    if (index < 0) return;
+    const ev = M.layout(state.rows)[index];
+    const left = ev.start * ppt();
+    const right = ev.end * ppt();
+    if (left < el.gridWrap.scrollLeft) el.gridWrap.scrollLeft = Math.max(0, left - 40);
+    else if (right > el.gridWrap.scrollLeft + el.gridWrap.clientWidth) el.gridWrap.scrollLeft = right - el.gridWrap.clientWidth + 40;
+    if (!ev.isRest) {
+      const top = pitchTop(ev.pitch);
+      if (top < el.gridWrap.scrollTop || top + ROW_H > el.gridWrap.scrollTop + el.gridWrap.clientHeight) {
+        el.gridWrap.scrollTop = Math.max(0, top - el.gridWrap.clientHeight / 2);
+      }
+    }
+    syncScroll();
+  }
+
+  // ------------------------------------------------------------- selection
+  function select(index, additive) {
+    if (!additive) state.selected.clear();
+    if (index >= 0 && index < state.rows.length) {
+      const uid = state.rows[index].uid;
+      if (additive && state.selected.has(uid)) state.selected.delete(uid);
+      else state.selected.add(uid);
+    }
+    render();
+  }
+
+  function selectRange(from, to) {
+    const [a, b] = from < to ? [from, to] : [to, from];
+    for (let i = a; i <= b; i += 1) state.selected.add(state.rows[i].uid);
+    render();
+  }
+
+  // ---------------------------------------------------------------- editing
+  function actionInsertNote() {
+    const after = lastSelected() >= 0 ? lastSelected() : state.rows.length - 1;
+    const ref = after >= 0 ? state.rows[after] : null;
+    const pitch = ref && !M.isRest(ref) ? ref.pitch : M.DEFAULT_PITCH;
+    const duration = ref ? ref.duration_index : M.QUARTER_INDEX;
+    const { rows, index } = M.insertNote(state.rows, after, pitch, duration);
+    state.selected.clear();
+    state.selected.add(rows[index].uid);
+    commit(rows);
+    ensureVisible(index);
+  }
+
+  function actionInsertRest() {
+    const after = lastSelected() >= 0 ? lastSelected() : state.rows.length - 1;
+    const { rows, index } = M.insertRest(state.rows, after, M.EIGHTH_INDEX);
+    state.selected.clear();
+    state.selected.add(rows[index].uid);
+    commit(rows);
+    ensureVisible(index);
+  }
+
+  function actionMelisma() {
+    const index = lastSelected();
+    if (index < 0 || M.isRest(state.rows[index])) return;
+    const { rows, index: newIndex } = M.addMelisma(state.rows, index);
+    state.selected.clear();
+    state.selected.add(rows[newIndex].uid);
+    commit(rows);
+    ensureVisible(newIndex);
+  }
+
+  function actionDelete(indices) {
+    const targets = indices || selectedIndices();
+    if (!targets.length) return;
+    const next = M.deleteRows(state.rows, targets);
+    const focus = Math.min(targets[0], next.length - 1);
+    state.selected.clear();
+    if (focus >= 0) state.selected.add(next[focus].uid);
+    commit(next);
+  }
+
+  function actionTranspose(delta) {
+    const indices = selectedIndices();
+    if (!indices.length) return;
+    commit(M.transpose(state.rows, indices, delta));
+    ensureVisible(indices[0]);
+  }
+
+  function actionStepDuration(step) {
+    const indices = selectedIndices();
+    if (!indices.length) return;
+    commit(M.stepDuration(state.rows, indices, step));
+  }
+
+  function actionSetLyric(index, text) {
+    const { rows, error } = M.setLyric(state.rows, index, text);
+    if (error) {
+      setMessage(error);
+      render();
+      return false;
+    }
+    setMessage(null);
+    commit(rows);
+    return true;
+  }
+
+  function actionUndo() {
+    if (!state.undo.length) return;
+    state.redo.push(currentValue());
+    const v = normalizeValue(state.undo.pop());
+    state.rows = v.rows; state.bpm = v.bpm; state.beatsPerBar = v.beatsPerBar;
+    pruneSelection();
+    publish();
+    render();
+  }
+
+  function actionRedo() {
+    if (!state.redo.length) return;
+    state.undo.push(currentValue());
+    const v = normalizeValue(state.redo.pop());
+    state.rows = v.rows; state.bpm = v.bpm; state.beatsPerBar = v.beatsPerBar;
+    pruneSelection();
+    publish();
+    render();
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    root.querySelectorAll(".vr-tool").forEach((btn) => btn.classList.toggle("active", btn.dataset.tool === tool));
+    render();
+  }
+
+  function setZoom(delta) {
+    const anchorTick = el.gridWrap.scrollLeft / ppt();
+    state.zoom = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, state.zoom + delta));
+    render();
+    el.gridWrap.scrollLeft = anchorTick * ppt();
+    syncScroll();
+  }
+
+  /** Pencil: click on a rest converts it, on a note inserts after it, past the end appends. */
+  function pencilAt(tick, pitch) {
+    const events = M.layout(state.rows);
+    const hit = events.find((ev) => tick >= ev.start && tick < ev.end);
+    const duration = Number(el.duration.value) || M.QUARTER_INDEX;
+    let rows;
+    let index;
+    if (!hit) {
+      ({ rows, index } = M.insertNote(state.rows, state.rows.length - 1, pitch, duration));
+    } else if (hit.isRest) {
+      rows = M.restToNote(state.rows, hit.index, pitch);
+      index = hit.index;
+    } else {
+      ({ rows, index } = M.insertNote(state.rows, hit.index, pitch, duration));
+    }
+    state.selected.clear();
+    state.selected.add(rows[index].uid);
+    commit(rows);
+  }
+
+  // --------------------------------------------------------- lyric editing
+  function openLyricEditor(index) {
+    closeLyricEditor();
+    const ev = M.layout(state.rows)[index];
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "vr-lyric-editor";
+    input.maxLength = 8;
+    input.value = ev.lyric;
+    input.style.left = `${ev.start * ppt()}px`;
+    input.style.top = `${ev.isRest ? 0 : pitchTop(ev.pitch)}px`;
+    input.style.width = `${Math.max(ev.ticks * ppt(), 48)}px`;
+    let done = false;
+    const finish = (apply) => {
+      if (done) return;
+      done = true;
+      const text = input.value;
+      // Removing a focused input fires blur synchronously, which re-enters finish().
+      try { if (input.isConnected) input.remove(); } catch (err) { /* already detached */ }
+      root.focus({ preventScroll: true });
+      if (apply && text !== ev.lyric) actionSetLyric(index, text);
+    };
+    input.vrFinish = finish;
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); finish(true); }
+      if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
+    el.grid.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  function closeLyricEditor(apply) {
+    const existing = el.grid.querySelector(".vr-lyric-editor");
+    if (!existing) return;
+    if (existing.vrFinish) existing.vrFinish(apply !== false);
+    else existing.remove();
+  }
+
+  // ---------------------------------------------------------------- pointer
+  function gridPoint(e) {
+    const rect = el.grid.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function onPointerDown(e) {
+    if (e.button !== 0) return;
+    const handle = e.target.closest(".vr-handle");
+    const note = e.target.closest(".vr-note, .vr-rest");
+    const inGrid = el.grid.contains(e.target) || el.rests.contains(e.target);
+    if (!inGrid) return;
+    closeLyricEditor();
+    root.focus({ preventScroll: true });
+
+    if (note) {
+      const index = Number(note.dataset.index);
+      if (state.tool === "eraser") { actionDelete([index]); return; }
+      // Notes are re-rendered on selection, so native dblclick never fires; detect it here.
+      const now = Date.now();
+      const last = state.lastClick;
+      const isDouble = !!last && last.index === index && now - last.time < 400
+        && Math.abs(last.x - e.clientX) < 4 && Math.abs(last.y - e.clientY) < 4;
+      state.lastClick = isDouble ? null : { index, time: now, x: e.clientX, y: e.clientY };
+      if (isDouble && state.tool === "select") {
+        select(index, false);
+        openLyricEditor(index);
+        e.preventDefault();
+        return;
+      }
+      if (handle && state.tool === "select") {
+        if (!state.selected.has(state.rows[index].uid)) select(index, e.shiftKey);
+        startResize(index, e);
+        e.preventDefault();
+        return;
+      }
+      if (state.tool === "pencil" && note.classList.contains("vr-note")) {
+        const p = gridPoint(e);
+        pencilAt(Math.floor(p.x / ppt()), pitchFromY(p.y));
+        return;
+      }
+      if (e.shiftKey && firstSelected() >= 0) selectRange(firstSelected(), index);
+      else if (e.ctrlKey || e.metaKey) select(index, true);
+      else if (!state.selected.has(state.rows[index].uid)) select(index, false);
+      else render();
+      if (note.classList.contains("vr-note")) startMove(e);
+      e.preventDefault();
+      return;
+    }
+
+    // Empty grid area.
+    const p = gridPoint(e);
+    if (state.tool === "pencil") {
+      pencilAt(Math.floor(p.x / ppt()), pitchFromY(p.y));
+    } else if (state.tool === "select") {
+      const tick = Math.floor(p.x / ppt());
+      const hit = M.layout(state.rows).find((ev) => ev.isRest && tick >= ev.start && tick < ev.end);
+      if (hit) select(hit.index, e.ctrlKey || e.metaKey);
+      else if (state.selected.size) { state.selected.clear(); render(); }
+    }
+  }
+
+  function startMove(e) {
+    const indices = selectedIndices().filter((i) => !M.isRest(state.rows[i]));
+    if (!indices.length) return;
+    state.drag = { kind: "move", startY: e.clientY, indices, base: state.rows, delta: 0 };
+    attachDragListeners();
+  }
+
+  function startResize(index, e) {
+    const ev = M.layout(state.rows)[index];
+    state.drag = { kind: "resize", index, startTick: ev.start, base: state.rows, current: state.rows[index].duration_index };
+    attachDragListeners();
+  }
+
+  function attachDragListeners() {
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  }
+
+  function onPointerMove(e) {
+    const d = state.drag;
+    if (!d) return;
+    if (d.kind === "move") {
+      const delta = -Math.round((e.clientY - d.startY) / ROW_H);
+      if (delta === d.delta) return;
+      d.delta = delta;
+      state.rows = M.transpose(d.base, d.indices, delta);
+      render();
+      el.notes.querySelectorAll(".vr-note.selected").forEach((n) => n.classList.add("dragging"));
+    } else if (d.kind === "resize") {
+      const p = gridPoint(e);
+      const ticks = Math.max(1, p.x / ppt() - d.startTick);
+      const index = M.nearestDurationIndex(ticks);
+      if (index === d.current) return;
+      d.current = index;
+      state.rows = M.setDuration(d.base, d.index, index);
+      render();
+    }
+  }
+
+  function onPointerUp() {
+    window.removeEventListener("pointermove", onPointerMove);
+    const d = state.drag;
+    state.drag = null;
+    if (!d) return;
+    const changed = JSON.stringify(state.rows) !== JSON.stringify(d.base);
+    const edited = state.rows;
+    state.rows = d.base;
+    if (changed) commit(edited);
+    else render();
+  }
+
+  // ---------------------------------------------------------------- keyboard
+  function onKeyDown(e) {
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "select" || tag === "textarea") return;
+    state.lastClick = null;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const key = e.key;
+    let handled = true;
+    if (ctrl && key.toLowerCase() === "z" && e.shiftKey) actionRedo();
+    else if (ctrl && key.toLowerCase() === "z") actionUndo();
+    else if (ctrl && key.toLowerCase() === "y") actionRedo();
+    else if (ctrl && key.toLowerCase() === "a") { state.rows.forEach((r) => state.selected.add(r.uid)); render(); }
+    else if (key === "Delete" || key === "Backspace") actionDelete();
+    else if (key === "ArrowUp") actionTranspose(e.shiftKey ? 12 : 1);
+    else if (key === "ArrowDown") actionTranspose(e.shiftKey ? -12 : -1);
+    else if (key === "ArrowLeft") { const i = firstSelected(); select(i > 0 ? i - 1 : (i < 0 ? state.rows.length - 1 : 0), false); ensureVisible(firstSelected()); }
+    else if (key === "ArrowRight") { const i = lastSelected(); select(i >= 0 && i < state.rows.length - 1 ? i + 1 : (i < 0 ? 0 : i), false); ensureVisible(firstSelected()); }
+    else if (key === "[") actionStepDuration(1);
+    else if (key === "]") actionStepDuration(-1);
+    else if (key === "Enter" || key === "F2") { const i = firstSelected(); if (i >= 0) openLyricEditor(i); }
+    else if (key === " ") togglePlayback();
+    else if (key === "Escape") { state.selected.clear(); stopPlayback(); render(); }
+    else if (key === "+" || key === "=") setZoom(1);
+    else if (key === "-" || key === "_") setZoom(-1);
+    else if (!ctrl && key.toLowerCase() === "n") actionInsertNote();
+    else if (!ctrl && key.toLowerCase() === "r") actionInsertRest();
+    else if (!ctrl && key.toLowerCase() === "m") actionMelisma();
+    else if (!ctrl && key.toLowerCase() === "v") setTool("select");
+    else if (!ctrl && key.toLowerCase() === "b") setTool("pencil");
+    else if (!ctrl && key.toLowerCase() === "e") setTool("eraser");
+    else handled = false;
+    if (handled) e.preventDefault();
+  }
+
+  // ---------------------------------------------------------------- playback
+  function togglePlayback() {
+    if (state.playing) stopPlayback();
+    else startPlayback();
+  }
+
+  function startPlayback() {
+    if (!state.rows.length) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { setMessage({ zh: "浏览器不支持 WebAudio。", en: "WebAudio is not available." }); return; }
+    if (!state.audio) state.audio = new Ctx();
+    const ctx = state.audio;
+    if (ctx.state === "suspended") ctx.resume();
+    const secPerTick = 60 / Math.max(1, state.bpm) / M.TICKS_PER_QUARTER;
+    const events = M.layout(state.rows);
+    const from = firstSelected() >= 0 ? events[firstSelected()].start : 0;
+    const master = ctx.createGain();
+    master.gain.value = 0.35;
+    master.connect(ctx.destination);
+    const t0 = ctx.currentTime + 0.05;
+    let endTime = t0;
+    for (const ev of events) {
+      if (ev.end <= from) continue;
+      const start = t0 + (Math.max(ev.start, from) - from) * secPerTick;
+      const stop = t0 + (ev.end - from) * secPerTick;
+      endTime = Math.max(endTime, stop);
+      if (ev.isRest || ev.pitch <= 0) continue;
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = 440 * Math.pow(2, (ev.pitch - 69) / 12);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(1, start + 0.012);
+      gain.gain.setValueAtTime(1, Math.max(start + 0.012, stop - 0.04));
+      gain.gain.linearRampToValueAtTime(0, stop);
+      osc.connect(gain).connect(master);
+      osc.start(start);
+      osc.stop(stop + 0.01);
+    }
+    state.playing = { master, t0, from, secPerTick, endTime, raf: 0 };
+    el.play.classList.add("playing");
+    el.play.textContent = "■ 停止 Stop";
+    el.playhead.classList.add("active");
+    const tick = () => {
+      if (!state.playing) return;
+      const now = ctx.currentTime;
+      if (now >= endTime) { stopPlayback(); return; }
+      const position = from + Math.max(0, now - t0) / secPerTick;
+      const x = position * ppt();
+      el.playhead.style.left = `${x}px`;
+      if (x > el.gridWrap.scrollLeft + el.gridWrap.clientWidth - 20 || x < el.gridWrap.scrollLeft) {
+        el.gridWrap.scrollLeft = Math.max(0, x - 60);
+        syncScroll();
+      }
+      state.playing.raf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  function stopPlayback() {
+    const p = state.playing;
+    if (!p) return;
+    cancelAnimationFrame(p.raf);
+    try { p.master.gain.setTargetAtTime(0, state.audio.currentTime, 0.01); } catch (err) { /* ignore */ }
+    setTimeout(() => { try { p.master.disconnect(); } catch (err) { /* ignore */ } }, 100);
+    state.playing = null;
+    el.play.classList.remove("playing");
+    el.play.textContent = "▶ 试听 Play";
+    el.playhead.classList.remove("active");
+  }
+
+  // ------------------------------------------------------------------ wiring
+  function buildDurationOptions() {
+    el.duration.innerHTML = M.DURATIONS.map((d, i) => `<option value="${i}">${d.zh} ${d.en} (1/${d.key})</option>`).join("");
+    el.duration.value = String(M.QUARTER_INDEX);
+  }
+
+  root.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action], button[data-tool]");
+    if (!btn || !root.contains(btn)) return;
+    e.preventDefault();
+    if (btn.dataset.tool) { setTool(btn.dataset.tool); return; }
+    const action = btn.dataset.action;
+    if (action === "play") togglePlayback();
+    else if (action === "stop") stopPlayback();
+    else if (action === "add-note") actionInsertNote();
+    else if (action === "add-rest") actionInsertRest();
+    else if (action === "melisma") actionMelisma();
+    else if (action === "delete") actionDelete();
+    else if (action === "undo") actionUndo();
+    else if (action === "redo") actionRedo();
+    else if (action === "zoom-in") setZoom(1);
+    else if (action === "zoom-out") setZoom(-1);
+    root.focus({ preventScroll: true });
+  });
+
+  el.bpm.addEventListener("change", () => {
+    const bpm = Math.round(Number(el.bpm.value));
+    if (!Number.isFinite(bpm)) { el.bpm.value = state.bpm; return; }
+    commit(null, { bpm: Math.max(M.MIN_BPM, Math.min(M.MAX_BPM, bpm)) });
+  });
+  el.meter.addEventListener("change", () => commit(null, { beatsPerBar: Number(el.meter.value) }));
+
+  el.lyric.addEventListener("change", () => {
+    const index = firstSelected();
+    if (index >= 0) actionSetLyric(index, el.lyric.value);
+  });
+  el.lyric.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el.lyric.blur(); root.focus({ preventScroll: true }); } });
+  el.pitch.addEventListener("change", () => {
+    const index = firstSelected();
+    if (index >= 0) commit(M.setPitch(state.rows, index, el.pitch.value));
+  });
+  el.duration.addEventListener("change", () => {
+    const indices = selectedIndices();
+    if (!indices.length) return;
+    const value = Number(el.duration.value);
+    let rows = state.rows;
+    for (const i of indices) rows = M.setDuration(rows, i, value);
+    commit(rows);
+  });
+
+  el.keys.addEventListener("click", (e) => {
+    const key = e.target.closest(".vr-key");
+    if (!key) return;
+    const indices = selectedIndices().filter((i) => !M.isRest(state.rows[i]));
+    if (indices.length) {
+      let rows = state.rows;
+      for (const i of indices) rows = M.setPitch(rows, i, Number(key.dataset.pitch));
+      commit(rows);
+    } else {
+      previewPitch(Number(key.dataset.pitch));
+    }
+  });
+
+  function previewPitch(pitch) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!state.audio) state.audio = new Ctx();
+    const ctx = state.audio;
+    if (ctx.state === "suspended") ctx.resume();
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = 440 * Math.pow(2, (pitch - 69) / 12);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.36);
+  }
+
+  root.addEventListener("pointerdown", onPointerDown);
+  root.addEventListener("keydown", onKeyDown);
+  el.gridWrap.addEventListener("scroll", syncScroll);
+  el.gridWrap.addEventListener("wheel", (e) => {
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // native horizontal scroll
+    if (e.ctrlKey) { e.preventDefault(); setZoom(e.deltaY < 0 ? 1 : -1); }
+  }, { passive: false });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => render()).observe(el.gridWrap);
+
+  watch("value", () => loadFromProps());
+
+  buildKeys();
+  buildDurationOptions();
+  loadFromProps();
+})();
