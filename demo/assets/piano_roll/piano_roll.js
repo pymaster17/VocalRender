@@ -865,11 +865,36 @@
 
   /* Ruler scrubbing, after SingScope's transport: the bar-number strip is a
    * seek zone, a dashed line previews where a click would land, and dragging
-   * scrubs. Snaps to the sixteenth grid unless Alt is held. */
+   * scrubs. Alt drops the snap entirely.
+   *
+   * Events are contiguous, so a note starts at the sum of the durations before
+   * it -- and the legal durations are powers of two and their dotted forms, not
+   * a uniform grid. One 32nd pushes everything after it off the sixteenth grid
+   * and one dotted 32nd pushes it off the 32nd grid too. Snapping to the drawn
+   * grid alone would therefore put the boundaries you actually want to audition
+   * from out of reach, so event edges are the primary targets and the grid is
+   * only the fallback in the empty space beyond the score. */
+  const SNAP_PX = 7;
+  function snapTick(tick) {
+    const px = ppt();
+    let edge = null;
+    let edgeDist = Infinity;
+    const consider = (candidate) => {
+      const dist = Math.abs(tick - candidate) * px;
+      if (dist < edgeDist) { edgeDist = dist; edge = candidate; }
+    };
+    for (const ev of M.layout(state.rows)) consider(ev.start);
+    consider(M.totalTicks(state.rows));
+    if (edge === null) return Math.round(tick / SUB_GRID_TICKS) * SUB_GRID_TICKS;
+    if (edgeDist <= SNAP_PX) return edge;
+    const grid = Math.round(tick / SUB_GRID_TICKS) * SUB_GRID_TICKS;
+    return edgeDist < Math.abs(tick - grid) * px ? edge : grid;
+  }
+
   function rulerTick(e, free) {
     const rect = el.bars.getBoundingClientRect();
     const tick = Math.max(0, (e.clientX - rect.left) / ppt());
-    return free ? tick : Math.round(tick / SUB_GRID_TICKS) * SUB_GRID_TICKS;
+    return free ? tick : snapTick(tick);
   }
 
   el.bars.addEventListener("pointerdown", (e) => {

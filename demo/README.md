@@ -45,7 +45,8 @@ has notes gets the words assigned to its notes in order. Then shape the melody d
 - click or drag the bar-number strip to place the playhead, then press ▶ (`Space`) to audition the
   melody with a synthesised tone before using the GPU. `Space` again pauses where the playhead is and
   the next `Space` resumes from there; ■ (`Esc`) stops and rewinds, `Home`/`End` jump to either end.
-  Seeking snaps to the sixteenth-note grid — hold `Alt` for a free position.
+  Seeking snaps to the nearest note or rest boundary, falling back to the sixteenth-note grid past
+  the end of the score — hold `Alt` for a free position.
 
 The footer shows the event and lyric-unit counts against the model limits and flags anything that
 would be rejected. You do not need to understand the model architecture or write code. Other
@@ -144,9 +145,11 @@ is loaded (replacing it) when selected in the UI, so GPU memory is that of a sin
 The piano roll is a single `gr.HTML` component: `assets/piano_roll/piano_roll.html` (shell),
 `piano_roll.css` (scoped styles), `score_model.js` (pure score logic, no DOM) and `piano_roll.js`
 (interaction, WebAudio transport). The grid draws bar and beat lines as CSS gradients plus a dashed
-sixteenth-note sub-division from a repeating one-tile SVG, hidden below 8 px of spacing; it is a
-visual and seek grid only, since note lengths always snap to the twelve model values (shortest: a
-thirty-second). Its value is `{"rows": [...], "bpm": int, "beats_per_bar": int}`,
+sixteenth-note sub-division from a repeating one-tile SVG, hidden below 8 px of spacing. It is a
+rhythmic reference, not a quantization target: note lengths snap to the twelve model values, and
+because events are contiguous and those values are powers of two *and their dotted forms*, a single
+32nd shifts every later start off the sixteenth grid (a dotted 32nd shifts it off the 32nd grid too).
+Seeking therefore snaps to event boundaries rather than to the drawn grid. Its value is `{"rows": [...], "bpm": int, "beats_per_bar": int}`,
 where `rows` is the same `word / word_index / uid / pitch / duration_index` list produced by the
 presets and the score importer (`vocalrender.utils.score_import`), so the backend is unchanged.
 
