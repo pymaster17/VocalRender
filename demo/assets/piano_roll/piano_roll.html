@@ -1,8 +1,9 @@
 <div class="vr-roll" tabindex="0" aria-label="Piano roll score editor">
   <div class="vr-toolbar">
     <div class="vr-group vr-transport">
-      <button type="button" class="vr-btn vr-play" data-action="play" title="播放 / 停止旋律试听 Play / stop melody preview (Space)">▶ 试听 Play</button>
-      <button type="button" class="vr-btn" data-action="stop" title="停止 Stop">■</button>
+      <button type="button" class="vr-btn vr-play" data-action="play" title="播放 / 暂停旋律试听 Play / pause melody preview (Space)">▶ 试听 Play</button>
+      <button type="button" class="vr-btn" data-action="stop" title="停止并回到开头 Stop and rewind (Esc)">■</button>
+      <span class="vr-time" title="播放头位置 Playhead position">0.0s</span>
       <label class="vr-field" title="速度 Tempo">BPM <input type="number" class="vr-input vr-bpm" data-field="bpm" min="1" max="255" step="1"></label>
       <label class="vr-field" title="拍号（仅影响网格）Meter (grid only)">拍号 Meter
         <select class="vr-input vr-meter" data-field="meter">
@@ -42,13 +43,13 @@
   </div>
   <div class="vr-body">
     <div class="vr-corner"><span>休止 Rest</span></div>
-    <div class="vr-ruler-wrap"><div class="vr-ruler"><div class="vr-bars"></div><div class="vr-rests"></div></div></div>
+    <div class="vr-ruler-wrap"><div class="vr-ruler"><div class="vr-bars" title="点击或拖动定位播放头 Click or drag to move the playhead"></div><div class="vr-cursor"></div><div class="vr-hover"></div><div class="vr-rests"></div></div></div>
     <div class="vr-keys-wrap"><div class="vr-keys"></div></div>
     <div class="vr-grid-wrap"><div class="vr-grid"><div class="vr-restcols"></div><div class="vr-notes"></div><div class="vr-playhead"></div><div class="vr-end"></div></div></div>
   </div>
   <div class="vr-footer">
     <span class="vr-counts"></span>
     <span class="vr-message"></span>
-    <span class="vr-hint">拖动=改音高 · 拖右缘=改时值 · 双击=改歌词（“-”延音，SP 休止）· ↑↓ 移调 · [ ] 时值 &nbsp;|&nbsp; drag = pitch · drag edge = length · double-click = lyric ("-" continuation, SP rest)</span>
+    <span class="vr-hint">拖动=改音高 · 拖右缘=改时值 · 双击=改歌词（“-”延音，SP 休止）· ↑↓ 移调 · [ ] 时值 · 点标尺=定位播放头 &nbsp;|&nbsp; drag = pitch · drag edge = length · double-click = lyric ("-" continuation, SP rest) · click the ruler to place the playhead</span>
   </div>
 </div>

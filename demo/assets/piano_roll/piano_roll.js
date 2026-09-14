@@ -18,6 +18,9 @@
   const ROWS = TOP_PITCH - BOTTOM_PITCH + 1;
   const GRID_H = ROWS * ROW_H;
   const ZOOM_LEVELS = [1.5, 2, 3, 4, 6, 8];
+  // Sixteenth note. Only a visual sub-division and a seek snap: note lengths
+  // still snap to the twelve model values, the shortest of which is a 32nd.
+  const SUB_GRID_TICKS = M.TICKS_PER_QUARTER / 4;
   const TAIL_TICKS = 8 * M.TICKS_PER_QUARTER;
   const BLACK = new Set([1, 3, 6, 8, 10]);
   const GLYPHS = { 1: "𝅝", 2: "𝅗𝅥", 4: "𝅘𝅥", 8: "𝅘𝅥𝅮", 16: "𝅘𝅥𝅯", 32: "𝅘𝅥𝅰" };
@@ -35,6 +38,9 @@
     glyph: root.querySelector(".vr-duration-glyph"),
     ruler: root.querySelector(".vr-ruler"),
     bars: root.querySelector(".vr-bars"),
+    cursor: root.querySelector(".vr-cursor"),
+    hover: root.querySelector(".vr-hover"),
+    time: root.querySelector(".vr-time"),
     rests: root.querySelector(".vr-rests"),
     keys: root.querySelector(".vr-keys"),
     gridWrap: root.querySelector(".vr-grid-wrap"),
@@ -62,6 +68,9 @@
     redo: [],
     drag: null,
     audio: null,
+    // Transport position in ticks. It outlives playback: pausing writes the
+    // current playhead back here, so play resumes where it stopped.
+    position: 0,
     playing: null,
     message: null,
     lastClick: null,
@@ -93,6 +102,9 @@
 
   /** Push the current state to the undo stack and publish it to Gradio. */
   function commit(nextRows, extra) {
+    // The oscillators for the whole take are scheduled up front, so any edit
+    // invalidates them. Pause rather than stop: the playhead stays put.
+    if (state.playing) pausePlayback();
     const before = currentValue();
     state.undo.push(before);
     if (state.undo.length > 100) state.undo.shift();
@@ -159,13 +171,32 @@
     const rowsLayer = `linear-gradient(to bottom, ${stops.join(", ")})`;
     const beatPx = M.TICKS_PER_BEAT * ppt();
     const barPx = beatPx * state.beatsPerBar;
+    const subPx = SUB_GRID_TICKS * ppt();
     const beats = `repeating-linear-gradient(to right, var(--vr-beat-line) 0 1px, transparent 1px ${beatPx}px)`;
     const bars = `repeating-linear-gradient(to right, var(--vr-bar-line) 0 1px, transparent 1px ${barPx}px)`;
+    const sub = subGridImage(subPx);
     const octaveLines = `repeating-linear-gradient(to bottom, var(--vr-c-line) 0 1px, transparent 1px ${12 * ROW_H}px)`;
     const rowLines = `repeating-linear-gradient(to bottom, var(--vr-beat-line) 0 1px, transparent 1px ${ROW_H}px)`;
-    el.grid.style.backgroundImage = [bars, beats, octaveLines, rowLines, rowsLayer].join(", ");
-    el.grid.style.backgroundSize = `${barPx}px 100%, ${beatPx}px 100%, 100% ${12 * ROW_H}px, 100% ${ROW_H}px, 100% ${12 * ROW_H}px`;
-    el.grid.style.backgroundPosition = `-1px 0, -1px 0, 0 ${ROW_H - 1}px, 0 ${ROW_H - 1}px, 0 0`;
+    el.grid.style.backgroundImage = [bars, beats, sub, octaveLines, rowLines, rowsLayer].join(", ");
+    el.grid.style.backgroundSize = `${barPx}px 100%, ${beatPx}px 100%, ${subPx}px 8px, 100% ${12 * ROW_H}px, 100% ${ROW_H}px, 100% ${12 * ROW_H}px`;
+    el.grid.style.backgroundPosition = `-1px 0, -1px 0, -1px 0, 0 ${ROW_H - 1}px, 0 ${ROW_H - 1}px, 0 0`;
+  }
+
+  /* Dashed sixteenth-note lines. A repeating-linear-gradient can only draw
+   * solid vertical lines, so the dash pattern comes from a one-tile SVG that
+   * the browser repeats. Recomputed only when the zoom or the theme changes. */
+  let subGridCache = { key: "", image: "none" };
+  function subGridImage(subPx) {
+    const key = `${subPx}|${isDark()}`;
+    if (subGridCache.key === key) return subGridCache.image;
+    let image = "none";
+    if (subPx >= 8) {
+      const color = getComputedStyle(root).getPropertyValue("--vr-sub-line").trim() || "rgba(0,0,0,.05)";
+      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${subPx}' height='8'><rect x='0' y='0' width='1' height='4' fill='${color}'/></svg>`;
+      image = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    }
+    subGridCache = { key, image };
+    return image;
   }
 
   const handleWidth = (w) => (w >= 24 ? 7 : Math.max(2, Math.floor(w / 3)));
@@ -219,6 +250,10 @@
 
     renderInspector();
     renderFooter();
+    if (!state.playing) {
+      state.position = Math.max(0, Math.min(state.position, total));
+      renderTransport(state.position);
+    }
     el.bpm.value = state.bpm;
     el.meter.value = String(state.beatsPerBar);
     el.undo.disabled = state.undo.length === 0;
@@ -294,6 +329,11 @@
   // ------------------------------------------------------------- selection
   function select(index, additive) {
     if (!additive) state.selected.clear();
+    // Keeps the old "play from the selected note" behaviour, but now the
+    // playhead shows where that is. Never disturbs a running take.
+    if (!state.playing && !additive && index >= 0 && index < state.rows.length) {
+      state.position = M.layout(state.rows)[index].start;
+    }
     if (index >= 0 && index < state.rows.length) {
       const uid = state.rows[index].uid;
       if (additive && state.selected.has(uid)) state.selected.delete(uid);
@@ -605,6 +645,8 @@
     else if (key === "Enter" || key === "F2") { const i = firstSelected(); if (i >= 0) openLyricEditor(i); }
     else if (key === " ") togglePlayback();
     else if (key === "Escape") { state.selected.clear(); stopPlayback(); render(); }
+    else if (key === "Home") seek(0);
+    else if (key === "End") seek(M.totalTicks(state.rows));
     else if (key === "+" || key === "=") setZoom(1);
     else if (key === "-" || key === "_") setZoom(-1);
     else if (!ctrl && key.toLowerCase() === "n") actionInsertNote();
@@ -618,8 +660,36 @@
   }
 
   // ---------------------------------------------------------------- playback
+  /** Live transport position in ticks, whether or not audio is running. */
+  function transportPosition() {
+    const p = state.playing;
+    if (!p) return state.position;
+    const elapsed = Math.max(0, state.audio.currentTime - p.t0);
+    return Math.min(p.from + elapsed / p.secPerTick, M.totalTicks(state.rows));
+  }
+
+  /** Move the playhead, the ruler cursor and the time readout. */
+  function renderTransport(tick) {
+    const x = tick * ppt();
+    el.playhead.style.left = `${x}px`;
+    el.cursor.style.left = `${x}px`;
+    el.time.textContent = formatSeconds(tick);
+  }
+
+  function seek(tick) {
+    const total = M.totalTicks(state.rows);
+    state.position = Math.max(0, Math.min(Math.round(tick), total));
+    if (state.playing) {
+      // Restarting is the only way to reschedule: the take is one-shot.
+      teardownAudio();
+      startPlayback();
+    } else {
+      renderTransport(state.position);
+    }
+  }
+
   function togglePlayback() {
-    if (state.playing) stopPlayback();
+    if (state.playing) pausePlayback();
     else startPlayback();
   }
 
@@ -630,9 +700,12 @@
     if (!state.audio) state.audio = new Ctx();
     const ctx = state.audio;
     if (ctx.state === "suspended") ctx.resume();
-    const secPerTick = 60 / Math.max(1, state.bpm) / M.TICKS_PER_QUARTER;
     const events = M.layout(state.rows);
-    const from = firstSelected() >= 0 ? events[firstSelected()].start : 0;
+    const total = M.totalTicks(state.rows);
+    // Pressing play at the end rewinds, the way a transport usually does.
+    const from = state.position >= total ? 0 : state.position;
+    state.position = from;
+    const secPerTick = 60 / Math.max(1, state.bpm) / M.TICKS_PER_QUARTER;
     const master = ctx.createGain();
     master.gain.value = 0.35;
     master.connect(ctx.destination);
@@ -658,15 +731,20 @@
     }
     state.playing = { master, t0, from, secPerTick, endTime, raf: 0 };
     el.play.classList.add("playing");
-    el.play.textContent = "■ 停止 Stop";
+    el.play.textContent = "⏸ 暂停 Pause";
     el.playhead.classList.add("active");
     const tick = () => {
       if (!state.playing) return;
-      const now = ctx.currentTime;
-      if (now >= endTime) { stopPlayback(); return; }
-      const position = from + Math.max(0, now - t0) / secPerTick;
+      if (ctx.currentTime >= state.playing.endTime) {
+        // Finished: leave the playhead at the end; the next play rewinds.
+        state.position = total;
+        teardownAudio();
+        renderTransport(state.position);
+        return;
+      }
+      const position = transportPosition();
+      renderTransport(position);
       const x = position * ppt();
-      el.playhead.style.left = `${x}px`;
       if (x > el.gridWrap.scrollLeft + el.gridWrap.clientWidth - 20 || x < el.gridWrap.scrollLeft) {
         el.gridWrap.scrollLeft = Math.max(0, x - 60);
         syncScroll();
@@ -676,7 +754,8 @@
     tick();
   }
 
-  function stopPlayback() {
+  /** Silence the take and drop the transport, leaving state.position alone. */
+  function teardownAudio() {
     const p = state.playing;
     if (!p) return;
     cancelAnimationFrame(p.raf);
@@ -686,6 +765,22 @@
     el.play.classList.remove("playing");
     el.play.textContent = "▶ 试听 Play";
     el.playhead.classList.remove("active");
+  }
+
+  /** Pause where the playhead currently is. */
+  function pausePlayback() {
+    if (!state.playing) return;
+    const position = transportPosition();
+    teardownAudio();
+    state.position = Math.max(0, Math.round(position));
+    renderTransport(state.position);
+  }
+
+  /** Stop and rewind to the start. */
+  function stopPlayback() {
+    teardownAudio();
+    state.position = 0;
+    renderTransport(0);
   }
 
   // ------------------------------------------------------------------ wiring
@@ -767,6 +862,35 @@
     osc.start();
     osc.stop(ctx.currentTime + 0.36);
   }
+
+  /* Ruler scrubbing, after SingScope's transport: the bar-number strip is a
+   * seek zone, a dashed line previews where a click would land, and dragging
+   * scrubs. Snaps to the sixteenth grid unless Alt is held. */
+  function rulerTick(e, free) {
+    const rect = el.bars.getBoundingClientRect();
+    const tick = Math.max(0, (e.clientX - rect.left) / ppt());
+    return free ? tick : Math.round(tick / SUB_GRID_TICKS) * SUB_GRID_TICKS;
+  }
+
+  el.bars.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    closeLyricEditor();
+    root.focus({ preventScroll: true });
+    const scrub = (ev) => seek(rulerTick(ev, ev.altKey));
+    scrub(e);
+    const up = () => {
+      window.removeEventListener("pointermove", scrub);
+      el.hover.classList.remove("on");
+    };
+    window.addEventListener("pointermove", scrub);
+    window.addEventListener("pointerup", up, { once: true });
+  });
+  el.bars.addEventListener("pointermove", (e) => {
+    el.hover.classList.add("on");
+    el.hover.style.left = `${rulerTick(e, e.altKey) * ppt()}px`;
+  });
+  el.bars.addEventListener("pointerleave", () => el.hover.classList.remove("on"));
 
   root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("keydown", onKeyDown);
