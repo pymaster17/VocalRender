@@ -456,11 +456,33 @@ CSS = """
 }
 #vr-header h1 { margin-bottom: .1rem; }
 #vr-header p { margin: 0; }
-#vr-sidebar { min-width: 260px; }
+#vr-sidebar { min-width: 235px; }
 #vr-sidebar .block { padding: .55rem .7rem; }
 #vr-track-title { font-weight: 600; }
 #vr-lyrics-row { align-items: flex-end; }
-#vr-generate { font-size: 1.05rem; }
+#vr-generate { font-size: 1.05rem; min-height: 46px; }
+#vr-heading { align-items: center; }
+.gradio-container { --layout-gap: 8px; }
+#vr-heading .wrap { flex-direction: row; }
+#vr-heading label { margin: 0; }
+#vr-editor-title h3 { margin: 0; }
+#vr-links { margin-top: -4px; }
+#vr-example-note { font-size: 13px; }
+#vr-result { min-height: 100px; }
+#vr-language { margin-left: auto; }
+#vr-intro p, #vr-links p, #vr-example-note p { margin: 0; }
+#vr-links { font-size: 12px; }
+#vr-generation { align-items: center; gap: 12px; }
+#vr-generation p { font-size: 12px; margin: 0; }
+#vr-reference { min-height: 120px; }
+#vr-reference .waveform-container { max-height: 60px; }
+#vr-alignment:empty, #vr-preset-info:empty { display: none; }
+#vr-sidebar h3 { margin: 0; }
+@media (max-width: 700px) {
+  #vr-heading { flex-direction: column; align-items: stretch; }
+  #vr-header { width: 100%; }
+  #vr-language { margin-left: 0; width: 100%; }
+}
 #piano-roll { padding: 0; }
 #piano-roll > .html-container, #piano-roll .prose { padding: 0; }
 """.replace("__BRAVURA_FONT_DATA__", BRAVURA_FONT_DATA)
@@ -689,6 +711,13 @@ def create_or_apply_lyrics(lyrics: str, score):
 
     rows = rows_from_score_value(score)
     units = [word for word in words if word.upper() != "SP"]
+    sung_words = len({row["word_index"] for row in rows if not _is_rest(row)})
+    if len(units) != sung_words:
+        raise gr.Error(
+            f"乐谱有 {sung_words} 个填词位置，输入了 {len(units)} 个字。请调整歌词或音符后再填入；原歌词未改变。 "
+            f"The score has {sung_words} lyric slots, but you entered {len(units)} units. "
+            "Match the lyrics to the notes first; existing lyrics are unchanged."
+        )
     assigned = 0
     current_word = None
     for index, row in enumerate(rows):
@@ -703,27 +732,19 @@ def create_or_apply_lyrics(lyrics: str, score):
                     if later["word_index"] != current_word:
                         break
                     later["word"] = word
-    sung_words = len({row["word_index"] for row in rows if not _is_rest(row)})
-    note = ""
-    if assigned < len(units):
-        note = f" 多余 {len(units) - assigned} 个字未使用 · {len(units) - assigned} extra lyric unit(s) were not used."
-    elif assigned < sung_words:
-        note = f" 还有 {sung_words - assigned} 个音符保留原歌词 · {sung_words - assigned} note(s) kept their previous lyric."
     return (
         score_value(rows, bpm_from_score_value(score), score.get("beats_per_bar", 4)),
-        _score_message(f"✅ 已将 {assigned} 个字填入音符 · Applied {assigned} lyric unit(s) to the notes.{note}"),
+        _score_message(f"✅ 已将 {assigned} 个字填入音符 · Applied {assigned} lyric unit(s) to the notes."),
     )
 
 
 def load_random_preset():
     """Choose a dataset preset and load it for user editing without using a GPU."""
     preset = random.choice(SCORE_PRESETS)
-    lyrics = "|".join(preset["words"])
+    sung_words = [word for word in preset["words"] if word.upper() != "SP"]
+    lyrics = ("|" if any(len(word) > 1 for word in sung_words) else "").join(sung_words)
     rows = _preset_to_rows(preset)
-    message = _score_message(
-        "🎲 **已载入预设 · Preset loaded.** 可在钢琴卷帘中调整音高、时值、延音和速度 · "
-        "Adjust any pitch, duration, melisma note, or tempo in the piano roll before generating."
-    )
+    message = _score_message("")
     return lyrics, score_value(rows, preset["bpm"]), message
 
 
@@ -861,133 +882,168 @@ def preview_voice(voice):
     return gr.Audio(value=path, visible=path is not None)
 
 
-GUIDE_MD = """
-### 使用流程 · Workflow
-1. **音色 Voice** — 在左侧音轨面板选择内置音色，或上传 2–8 秒干净的清唱。
-   Pick an included voice in the track panel, or upload 2–8 seconds of clean, unaccompanied singing.
-2. **歌词 Lyrics** — 输入中文歌词并按 **应用歌词**：空卷帘时按字生成四分音符，已有音符时按顺序填入歌词。
-   Enter Chinese lyrics and press **Apply lyrics**: an empty roll gets one quarter note per character; otherwise the words are assigned to existing notes in order.
-3. **旋律 Melody** — 在钢琴卷帘中拖动音符改音高，拖右缘改时值，双击改歌词（`-` 延音，`SP` 休止），铅笔工具点击添加音符。
-   Drag notes for pitch, drag the right edge for length, double-click to edit the lyric (`-` continues the previous word, `SP` makes a rest), use the pencil to add notes.
-   > **关于时值 · About note lengths** — 模型读的是乐谱符号，不是毫秒，它的时值词汇只有十二个：全音符到三十二分音符，以及各自的附点（×1.5）形式。
-   > 因为这十二个值成倍数排列，越长的音符之间间隔越大——拖右缘时把鼠标停在手柄上，卷帘会标出全部合法长度，这不是吸附精度下降。
-   > The model reads score symbols, not milliseconds: its whole vocabulary is twelve lengths — whole down to thirty-second, plus the dotted (x1.5) form of each.
-   > They are spaced geometrically, so the gaps widen as notes get longer. Hover the right edge of a note and the roll marks every legal length; the coarseness is the alphabet, not loose snapping.
-4. **试听 Preview** — 按 ▶ 用合成音色试听旋律（不占用 GPU）。Press ▶ to audition the melody with a synth tone (no GPU).
-5. **生成 Generate** — 设置速度后按 **生成歌声**。Set the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.
+# Static copy is registered once; language changes update labels without replacing
+# user values, the score, selection, or undo history.
+LOCALIZED = []
 
-也可以按 **🎲 随机预设** 载入现成乐谱，或展开 **导入乐谱** 载入 ABC / MusicXML。
-You can also press **🎲 Random preset** for a ready-made score, or open **Import score** for ABC / MusicXML.
 
-> 本模型仅支持中文歌词 · This checkpoint supports Chinese lyrics only. 请只上传您拥有或获得授权的录音 · Only upload a voice recording that you own or have permission to use.
+def ui(component, **kwargs):
+    translations = {key: value for key, value in kwargs.items() if isinstance(value, tuple)}
+    widget = component(**{key: value[0] if key in translations else value for key, value in kwargs.items()})
+    if translations:
+        LOCALIZED.append((widget, translations))
+    return widget
+
+
+def change_language(language):
+    index = 1 if language == "en" else 0
+    updates = [gr.update(**{key: value[index] for key, value in translations.items()})
+               for _, translations in LOCALIZED]
+    return updates + [gr.HTML(language=language)]
+
+
+def check_lyric_alignment(lyrics, score, language):
+    """Preview mismatches on the affected notes without modifying the score."""
+    try:
+        units = [word for word in _split_lyrics(lyrics) if word.upper() != "SP"]
+    except gr.Error as exc:
+        return str(exc), gr.HTML(lyric_targets=[])
+    rows = score.get("rows", []) if isinstance(score, dict) else []
+    groups = list(dict.fromkeys(row["word_index"] for row in rows if not _is_rest(row)))
+    missing = set(groups[len(units):])
+    targets = [row["uid"] for row in rows if row["word_index"] in missing and not _is_rest(row)]
+    if not rows or len(units) == len(groups):
+        return "", gr.HTML(lyric_targets=[])
+    if language == "en":
+        message = f"⚠ {len(groups)} lyric slots · {len(units)} entered. "
+        message += "Highlighted notes need lyrics." if missing else f"Remove {len(units) - len(groups)} extra lyric units or add notes."
+    else:
+        message = f"⚠ 乐谱有 {len(groups)} 个填词位置，输入了 {len(units)} 个字。"
+        message += "高亮音符尚缺歌词。" if missing else f"请删去多出的 {len(units) - len(groups)} 个字，或添加音符。"
+    return message, gr.HTML(lyric_targets=targets)
+
+
+GUIDE_ZH = """
+### 从随机示例开始
+示例来自真实歌声音频的转录。先试听旋律，改一两个音符，再生成歌声。
+- **参考音色**：决定用什么声音唱；不需要唱相同歌词或旋律。只上传有权使用的 2–8 秒干净清唱。
+- **歌词与旋律**：决定唱什么、音高和每个音的长度。拖音符改音高，拖右缘改时值，双击改字。
+- **一字多音**：选中一个字，按“一字多音”，让这个字继续唱下一个音。
+- **BPM**：控制速度。拍号仅改变编辑网格。
+- **试听旋律**是合成音；左侧播放参考录音；**生成歌声**才是模型输出。
+
+### 歌词与节奏
+普通中文按字填入音符。用 `|` 自定义拆分；`SP` 表示休止；音符中的 `-` 表示继续唱前一个字。
+填词数量需与乐谱一致，一字多音只计一个填词位置，休止不占填词位置。
+支持全音符至三十二分音符及其附点时值。调整时值会移动后续音符。
+
+### 快捷键
+空格：试听／暂停；Esc：停止；↑↓：移调；Shift+↑↓：八度；[ / ]：时值；
+N：音符；R：休止；M：一字多音；Delete：删除；Ctrl/Cmd+Z：撤销。
+
+### 导入乐谱
+支持 ABC 和 MusicXML。解析后选择声部、歌词行和小节范围，再载入。
+ABC `w:` 和 MusicXML 内嵌歌词可自动对齐；`W:` 是页面文字，请将对应中文粘贴到歌词框。
+"""
+GUIDE_EN = """
+### Start with a random example
+Examples are transcribed from real singing recordings. Preview the melody, edit a note or two, then generate.
+- **Voice reference** sets the vocal timbre; it need not contain the same lyrics or melody. Upload only 2–8 seconds of clean singing you have permission to use.
+- **Lyrics and melody** specify the words, pitches and note lengths. Drag notes for pitch, drag their right edge for length, double-click to edit a lyric.
+- **Melisma** continues the selected word on another note.
+- **BPM** controls tempo. Meter changes the editor grid only.
+- **Preview melody** plays a synth tone; the left player plays the reference recording; **Generate singing** produces model output.
+
+### Lyrics and rhythm
+Chinese text is split per character. Use `|` for custom units, `SP` for rests, and `-` on a note to continue the preceding word.
+Match the number of lyric slots: a melisma counts once and rests use no lyric slots.
+Supported lengths are whole through thirty-second notes and their dotted forms. Resizing a note shifts later notes.
+
+### Shortcuts
+Space: preview/pause; Esc: stop; ↑↓: transpose; Shift+↑↓: octave; [ / ]: length;
+N: note; R: rest; M: melisma; Delete: delete; Ctrl/Cmd+Z: undo.
+
+### Import a score
+Parse ABC or MusicXML, choose a part, lyric line and measure range, then load it.
+ABC `w:` and MusicXML embedded lyrics align automatically. For `W:` page text, paste the matching Chinese passage into the lyrics box.
 """
 
-
 with gr.Blocks(title="VocalRender") as demo:
-    gr.Markdown(
-        "# 🎵 VocalRender — 乐谱驱动的歌声合成 · Score-native singing voice synthesis\n"
-        "用歌词、音符和速度描述旋律，短短几秒的参考录音提供音色 · "
-        "Describe a melody with lyrics, notes, and tempo; a short singing clip supplies the vocal color. "
-        "[Model](https://huggingface.co/pymaster/VocalRender) · "
-        "[Paper](https://arxiv.org/abs/2607.27768) · "
-        "[Code](https://github.com/pymaster17/VocalRender)",
-        elem_id="vr-header",
-    )
+    with gr.Row(elem_id="vr-heading"):
+        ui(gr.Markdown, value=(
+            "# VocalRender\n给定歌词与旋律，用参考音色生成歌声。",
+            "# VocalRender\nTurn lyrics and a melody into singing with a reference voice."), elem_id="vr-header")
+        language = gr.Radio(choices=[("中文", "zh"), ("English", "en")], value="zh",
+                            show_label=False, container=False, elem_id="vr-language", scale=0, min_width=230)
+    ui(gr.Markdown, value=(
+        "控制 **歌词 · 音高 · 时值 · 速度 · 音色**。参考录音无需演唱相同内容。当前支持 **中文歌词**。",
+        "Control **lyrics · pitch · note length · tempo · timbre**. The reference need not sing the same content. **Chinese lyrics only**."), elem_id="vr-intro")
+    gr.Markdown("[Model](https://huggingface.co/pymaster/VocalRender) · [Paper](https://arxiv.org/abs/2607.27768) · [Code](https://github.com/pymaster17/VocalRender)", elem_id="vr-links")
 
     with gr.Row(equal_height=False):
-        # ------------------------------------------------------------ sidebar
-        with gr.Column(scale=1, min_width=260, elem_id="vr-sidebar"):
-            gr.Markdown("🎤 **音轨 · Vocal track**", elem_id="vr-track-title")
-            voice_preset = gr.Dropdown(
-                choices=VOICE_CHOICES,
-                value="Alto-1",
-                label="音色参考 · Voice reference",
-                info="内置音色来自 GTSinger · Included voices are GTSinger excerpts.",
-                interactive=True,
-            )
-            voice_preview = gr.Audio(
-                value=VOICE_PRESETS["Alto-1"],
-                label="试听参考音色 · Reference preview",
-                interactive=False,
-            )
-            prompt_audio = gr.Audio(
-                label="上传 2–8 秒清唱 · Upload 2–8 s of clean singing",
-                type="filepath",
-                format="wav",
-                interactive=True,
-                visible=False,
-            )
-            checkpoint = gr.Radio(
-                choices=list(CKPT_VARIANTS),
-                value=DEFAULT_CKPT_VARIANT,
-                label="模型 · Checkpoint",
-                info="切换时才加载权重，显存中只保留一个模型 · Loaded on selection; only one model stays in memory.",
-                interactive=True,
-                visible=len(CKPT_VARIANTS) > 1,
-            )
-
-            with gr.Accordion("📥 导入乐谱 · Import ABC / MusicXML", open=False):
-                gr.Markdown(
-                    "粘贴 ABC 或上传 `.abc` / `.txt` / `.musicxml` / `.xml` / `.mxl`，解析后选择声部、歌词行和小节范围，再载入卷帘。\n\n"
-                    "Paste ABC or upload a file, press **Parse**, check the part, lyric line and measure range, then load it into the roll. "
-                    "ABC `w:` and MusicXML lyrics align automatically; for `W:` page text paste the Chinese passage into the lyrics box and choose **Use lyrics textbox**."
-                )
-                abc_score_text = gr.Textbox(
-                    label="ABC 记谱 · ABC notation",
-                    lines=6,
-                    placeholder="X:1\nT:My song\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\nC D E F |\nw: 我 爱 唱 歌",
-                )
-                score_file = gr.File(
-                    label="或上传乐谱文件 · Or upload a score file",
-                    file_types=[".abc", ".txt", ".musicxml", ".xml", ".mxl"],
-                    type="filepath",
-                )
-                parse_score_btn = gr.Button("解析 · Parse score", variant="secondary")
+        with gr.Column(scale=1, min_width=235, elem_id="vr-sidebar"):
+            ui(gr.Markdown, value=("### 1 · 选择音色", "### 1 · Choose a voice"))
+            voice_preset = ui(gr.Dropdown, choices=(VOICE_CHOICES, [(key, key) for key in VOICE_PRESETS]), value="Alto-1",
+                label=("参考音色", "Voice reference"),
+                info=("决定用什么声音唱。内置参考来自 GTSinger。", "Sets the vocal timbre. Included references come from GTSinger."), interactive=True)
+            voice_preview = ui(gr.Audio, value=VOICE_PRESETS["Alto-1"],
+                label=("试听参考录音", "Listen to the reference"), interactive=False, elem_id="vr-reference")
+            prompt_audio = ui(gr.Audio, label=("上传 2–8 秒干净清唱", "Upload 2–8 s of clean singing"),
+                type="filepath", format="wav", interactive=True, visible=False)
+            ui(gr.Markdown, value=("参考无需唱相同歌词或旋律。", "The reference can use different lyrics and melody."))
+            checkpoint = ui(gr.Radio, choices=list(CKPT_VARIANTS), value=DEFAULT_CKPT_VARIANT,
+                label=("模型版本", "Model version"), interactive=True, visible=len(CKPT_VARIANTS) > 1)
+            with ui(gr.Accordion, label=("导入 ABC / MusicXML", "Import ABC / MusicXML"), open=False):
+                ui(gr.Markdown, value=("上传乐谱或粘贴 ABC，解析后选择要试听的小节。", "Upload a score or paste ABC, then parse and choose a measure range."))
+                abc_score_text = ui(gr.Textbox, label=("ABC 记谱", "ABC notation"), lines=4,
+                    placeholder="X:1\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\nC D E F |\nw: 我 爱 唱 歌")
+                score_file = ui(gr.File, label=("乐谱文件", "Score file"), file_types=[".abc", ".txt", ".musicxml", ".xml", ".mxl"], type="filepath")
+                parse_score_btn = ui(gr.Button, value=("解析乐谱", "Parse score"), variant="secondary")
                 imported_score_state = gr.State(None)
-                imported_part = gr.Dropdown(label="作品 / 声部 · Work / vocal part", choices=[])
-                imported_verse = gr.Dropdown(label="歌词行 · Lyric line", choices=[])
+                imported_part = ui(gr.Dropdown, label=("作品 / 声部", "Work / vocal part"), choices=[])
+                imported_verse = ui(gr.Dropdown, label=("歌词行", "Lyric line"), choices=[])
                 with gr.Row():
-                    imported_start_measure = gr.Dropdown(label="起始小节 · Start", choices=[])
-                    imported_end_measure = gr.Dropdown(label="结束小节 · End", choices=[])
+                    imported_start_measure = ui(gr.Dropdown, label=("起始小节", "Start measure"), choices=[])
+                    imported_end_measure = ui(gr.Dropdown, label=("结束小节", "End measure"), choices=[])
                 imported_score_info = gr.Markdown("")
-                load_imported_btn = gr.Button("载入卷帘 · Load range into roll", variant="primary")
-
-            with gr.Accordion("⚙️ 高级设置 · Advanced settings", open=False):
-                cfg_value = gr.Slider(0.5, 5.0, value=2.0, step=0.1, label="CFG value")
-                inference_timesteps = gr.Slider(1, 50, value=10, step=1, label="Inference timesteps")
-                temperature = gr.Slider(0.1, 2.0, value=1.0, step=0.1, label="Temperature")
+                load_imported_btn = ui(gr.Button, value=("载入卷帘", "Load into piano roll"), variant="secondary")
+            with ui(gr.Accordion, label=("高级设置", "Advanced settings"), open=False):
+                cfg_value = gr.Slider(0.5, 5.0, value=2.0, step=0.1, label="CFG")
+                inference_timesteps = ui(gr.Slider, minimum=1, maximum=50, value=10, step=1, label=("推理步数", "Inference steps"))
+                temperature = ui(gr.Slider, minimum=0.1, maximum=2.0, value=1.0, step=0.1, label=("采样温度", "Temperature"))
                 max_len = gr.Slider(100, 3000, value=2000, step=100, label="Max length (patches)")
+            with ui(gr.Accordion, label=("使用指南与快捷键", "Guide & shortcuts"), open=False):
+                ui(gr.Markdown, value=(GUIDE_ZH, GUIDE_EN))
 
-            with gr.Accordion("❔ 使用指南 · Guide", open=False):
-                gr.Markdown(GUIDE_MD)
-
-        # --------------------------------------------------------------- main
         with gr.Column(scale=4):
+            ui(gr.Markdown, value=("### 2 · 试听与调整旋律", "### 2 · Preview and edit the melody"), elem_id="vr-editor-title")
+            ui(gr.Markdown, value=(
+                "已随机载入真实歌声转录示例。直接生成，或改一两个音符，听听模型如何跟随乐谱。",
+                "Start with a random score transcribed from real singing. Generate as is, or edit a note to hear how the model follows your score."), elem_id="vr-example-note")
             with gr.Row(elem_id="vr-lyrics-row"):
-                lyrics_str = gr.Textbox(
-                    label="歌词 · Lyrics",
-                    value="",
-                    placeholder="输入中文歌词，或点击 🎲 随机预设 · Enter Chinese lyrics, or click 🎲 Random preset",
-                    info="按字拆分；用 | 控制拆分，SP 表示休止 · Split per character; use | to control the split, SP for a rest.",
-                    scale=5,
-                )
-                apply_lyrics_btn = gr.Button("应用歌词 · Apply lyrics", variant="secondary", scale=1)
-                random_preset_btn = gr.Button("🎲 随机预设 · Random preset", variant="secondary", scale=1)
-
-            score_editor = gr.HTML(
-                value=score_value([], DEFAULT_BPM),
-                html_template=PIANO_ROLL_HTML,
-                css_template=PIANO_ROLL_CSS,
-                js_on_load=PIANO_ROLL_JS,
-                elem_id="piano-roll",
-            )
-            preset_info = gr.Markdown("")
-
-            with gr.Row():
-                easy_run_btn = gr.Button("🎵 生成歌声 · Generate Singing", variant="primary", scale=2, elem_id="vr-generate")
-                status_out = gr.Markdown("", min_height=10)
-            audio_out = gr.Audio(label="合成结果 · Synthesized singing", type="filepath", format="wav")
+                lyrics_str = ui(gr.Textbox, label=("歌词 · 决定唱什么", "Lyrics · what to sing"), value="",
+                    placeholder=("输入中文歌词", "Enter Chinese lyrics"), scale=5)
+                apply_lyrics_btn = ui(gr.Button, value=("将歌词填入音符", "Fill notes with lyrics"), variant="secondary", scale=1)
+                random_preset_btn = ui(gr.Button, value=("换个随机示例", "Random example"), variant="secondary", scale=1)
+            alignment_info = gr.Markdown("", elem_id="vr-alignment")
+            with gr.Row(elem_id="vr-generation"):
+                easy_run_btn = ui(gr.Button, value=("生成歌声", "Generate singing"), variant="primary", scale=1, elem_id="vr-generate")
+                ui(gr.Markdown, value=("使用 ZeroGPU，可能需要排队。旋律试听无需 GPU。", "ZeroGPU generation may queue. Melody preview needs no GPU."))
+            score_editor = gr.HTML(value=score_value([], DEFAULT_BPM), html_template=PIANO_ROLL_HTML,
+                css_template=PIANO_ROLL_CSS, js_on_load=PIANO_ROLL_JS,
+                language="zh", lyric_targets=[], elem_id="piano-roll")
+            preset_info = gr.Markdown("", elem_id="vr-preset-info")
+            status_out = gr.Markdown("", min_height=0)
+            audio_out = ui(gr.Audio, label=("模型生成的歌声", "Model-generated singing"), type="filepath", format="wav", elem_id="vr-result")
             prompt_out = gr.Textbox(label="Generated SVS prompt (debug)", visible=UI_ONLY)
+
+    language.change(change_language, inputs=language,
+                    outputs=[widget for widget, _ in LOCALIZED] + [score_editor], queue=False).then(
+        check_lyric_alignment, inputs=[lyrics_str, score_editor, language],
+        outputs=[alignment_info, score_editor], queue=False, show_progress="hidden")
+    lyrics_str.change(check_lyric_alignment, inputs=[lyrics_str, score_editor, language],
+                     outputs=[alignment_info, score_editor], queue=False, show_progress="hidden")
+    demo.load(load_random_preset, outputs=[lyrics_str, score_editor, preset_info], queue=False)
 
     # ------------------------------------------------------------------ events
     checkpoint.input(switch_checkpoint, inputs=checkpoint, outputs=status_out)
@@ -1065,4 +1121,4 @@ if __name__ == "__main__":
     # Host/port come from GRADIO_SERVER_NAME / GRADIO_SERVER_PORT (Gradio reads
     # them itself); Spaces sets them automatically, self-hosting usually wants
     # GRADIO_SERVER_NAME=0.0.0.0.
-    demo.launch(mcp_server=True, theme=gr.themes.Citrus(), css=CSS)
+    demo.launch(mcp_server=True, theme=gr.themes.Soft(primary_hue="blue", secondary_hue="slate"), css=CSS)

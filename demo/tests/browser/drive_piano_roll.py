@@ -9,7 +9,7 @@ Requires the dev extra (playwright) and `playwright install chromium`.
 
 import os
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 URL = "http://127.0.0.1:7871/"
 SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
@@ -23,11 +23,13 @@ with sync_playwright() as p:
     page.on("pageerror", lambda e: errors.append(f"[pageerror] {e}"))
     page.goto(URL)
     page.wait_for_selector(".vr-roll", timeout=30000)
-    page.wait_for_timeout(500)
-    page.screenshot(path=SHOTS + "/01_empty.png")
-    out.append(("empty counts", page.text_content(".vr-counts")))
+    page.wait_for_selector(".vr-note", timeout=15000)
+    assert page.get_by_label("Generated SVS prompt (debug)").is_visible(), "Only run this test in UI-only mode"
+    assert page.locator("#vr-generate").bounding_box()["y"] < 700
+    page.screenshot(path=SHOTS + "/01_initial_example.png")
+    out.append(("initial random example", page.text_content(".vr-counts")))
 
-    page.get_by_role("button", name="随机预设").click()
+    page.get_by_role("button", name="换个随机示例").click()
     page.wait_for_selector(".vr-note", timeout=10000)
     page.wait_for_timeout(500)
     out.append(("preset notes/rests", (page.locator(".vr-note").count(), page.locator(".vr-rest").count())))
@@ -72,13 +74,14 @@ with sync_playwright() as p:
 
     page.locator(".vr-note").nth(2).click()
     n0 = page.locator(".vr-note").count()
-    page.get_by_role("button", name="延音 Melisma").click()
+    page.get_by_role("button", name="一字多音").click()
     page.wait_for_timeout(100)
     n1 = page.locator(".vr-note").count()
-    page.get_by_role("button", name="休止 Rest").click()
+    page.locator(".vr-more summary").click()
+    page.get_by_role("button", name="+ 休止").click()
     page.wait_for_timeout(100)
     r1 = page.locator(".vr-rest").count()
-    page.get_by_role("button", name="删除 Delete").click()
+    page.get_by_role("button", name="删除").click()
     page.wait_for_timeout(100)
     r2 = page.locator(".vr-rest").count()
     out.append(("melisma/rest/delete", (n0, n1, r1, r2)))
@@ -88,7 +91,8 @@ with sync_playwright() as p:
     page.wait_for_timeout(100)
     out.append(("after undo x2 notes/rests", (page.locator(".vr-note").count(), page.locator(".vr-rest").count())))
 
-    page.get_by_role("button", name="铅笔 Draw").click()
+    page.get_by_role("button", name="画音符").click()
+    page.locator(".vr-more summary").click()
     end = page.locator(".vr-end").bounding_box()
     wrap = page.locator(".vr-grid-wrap").bounding_box()
     page.mouse.click(end["x"] + 40, wrap["y"] + wrap["height"] / 2)
@@ -107,11 +111,39 @@ with sync_playwright() as p:
     out.append(("debug prompt", page.get_by_label("Generated SVS prompt (debug)").input_value()[:220]))
     page.screenshot(path=SHOTS + "/04_generated.png", full_page=True)
 
-    page.locator("#vr-lyrics-row textarea, #vr-lyrics-row input").first.fill("我爱唱歌你好世界")
-    page.get_by_role("button", name="应用歌词").click()
-    page.wait_for_timeout(1500)
-    out.append(("after apply lyrics", [page.locator(".vr-note").nth(i).text_content() for i in range(6)]))
-    out.append(("apply message", page.locator("#piano-roll").locator("xpath=following-sibling::*[1]").text_content().strip()[:200]))
+    # Changing language must preserve the score and undo state.
+    notes_before = page.locator(".vr-note").all_text_contents()
+    page.get_by_text("English", exact=True).click()
+    expect(page.locator(".vr-play")).to_have_text("▶ Preview melody")
+    assert page.locator(".vr-note").all_text_contents() == notes_before
+    assert page.locator('[data-action="undo"]').is_enabled()
+    page.locator('[data-action="play"]').click()
+    expect(page.locator(".vr-play")).to_have_text("⏸ Pause")
+    page.locator('[data-action="stop"]').click()
+
+    # Short lyrics highlight missing slots, and applying them leaves notes intact.
+    page.locator("#vr-lyrics-row textarea").fill("我")
+    expect(page.locator("#vr-alignment")).to_contain_text("lyric slots")
+    expect(page.locator(".lyric-missing").first).to_be_attached()
+    page.get_by_role("button", name="Fill notes with lyrics").click()
+    expect(page.get_by_text("Match the lyrics to the notes first", exact=False)).to_be_visible()
+    assert page.locator(".vr-note").all_text_contents() == notes_before
+    page.get_by_role("button", name="Random example", exact=True).click()
+    expect(page.locator("#vr-alignment")).to_have_text("")
+    expect(page.locator(".lyric-missing")).to_have_count(0)
+
+    # Retain the score-import path in the compact sidebar.
+    page.get_by_text("Import ABC / MusicXML", exact=True).click()
+    page.get_by_label("ABC notation", exact=True).fill("X:1\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\nC D E F |\nw: 我 爱 唱 歌")
+    page.get_by_role("button", name="Parse score", exact=True).click()
+    expect(page.get_by_text("Score parsed.", exact=False)).to_be_visible()
+    page.get_by_role("button", name="Load into piano roll", exact=True).click()
+    expect(page.locator(".vr-note")).to_have_count(4)
+    assert page.locator(".vr-note").all_text_contents() == ["我", "爱", "唱", "歌"]
+    page.screenshot(path=SHOTS + "/05_english_import.png", full_page=True)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.screenshot(path=SHOTS + "/06_mobile.png", full_page=True)
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), page.evaluate("({width:innerWidth, scroll:document.documentElement.scrollWidth})")
     browser.close()
 
 for k, v in out:

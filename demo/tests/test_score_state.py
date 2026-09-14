@@ -68,9 +68,12 @@ def test_apply_lyrics_relabels_sung_words_in_order(app):
     for row in existing["rows"]:
         if row["word"] != "SP":
             row["word"] = "啊"
-    value, message = app.create_or_apply_lyrics("我|爱|你", existing)
+    with pytest.raises(app.gr.Error, match="existing lyrics are unchanged"):
+        app.create_or_apply_lyrics("我|爱|你", existing)
+    assert [r["word"] for r in existing["rows"]] == ["SP", "啊", "啊", "啊"]
+    value, message = app.create_or_apply_lyrics("我|爱", existing)
     assert [r["word"] for r in value["rows"]] == ["SP", "我", "我", "爱"]
-    assert "1 extra lyric unit" in message.constructor_args["value"]
+
 
 
 def test_generate_from_score_builds_the_model_entry_in_ui_only_mode(app):
@@ -92,3 +95,27 @@ def test_load_random_preset_round_trips_every_preset(app):
         assert [r["pitch"] for r in rows] == preset["pitches"]
         assert [r["word_index"] for r in rows] == preset["pitch2word"]
         assert [app.NOTE_DURATION_OPTIONS[r["duration_index"]][1] for r in rows] == preset["notes"]
+
+
+def test_missing_lyrics_highlight_entire_melisma_without_changing_score(app):
+    score = app.score_value([
+        _row("我", 0, 60, 5), _row("爱", 1, 62, 5), _row("爱", 1, 64, 5),
+        _row("SP", 2, 0, 5),
+    ], 90)
+    message, update = app.check_lyric_alignment("我", score, "en")
+    assert "2 lyric slots" in message
+    assert update.props["lyric_targets"] == [score["rows"][1]["uid"], score["rows"][2]["uid"]]
+    with pytest.raises(app.gr.Error):
+        app.create_or_apply_lyrics("我", score)
+    assert score["rows"][1]["word"] == "爱"
+    message, update = app.check_lyric_alignment("我爱", score, "zh")
+    assert message == "" and update.props["lyric_targets"] == []
+
+
+def test_random_example_has_readable_lyrics_and_original_score(app, monkeypatch):
+    preset = app.SCORE_PRESETS[0]
+    monkeypatch.setattr(app.random, "choice", lambda _presets: preset)
+    lyrics, score, _ = app.load_random_preset()
+    assert lyrics == "".join(word for word in preset["words"] if word.upper() != "SP")
+    assert [row["pitch"] for row in score["rows"]] == preset["pitches"]
+    assert score["bpm"] == preset["bpm"]

@@ -31,16 +31,20 @@ supports Chinese lyrics only. Inputs containing other languages are rejected bef
 
 The editor follows the track + piano-roll workflow of tools such as SynthesizerV. The left
 panel is the vocal track (voice reference, checkpoint, score import, advanced settings); the main
-area is a piano roll with a transport bar. Type Chinese lyrics and press **应用歌词 Apply lyrics**:
+area is a piano roll with a transport bar. A random example transcribed from real singing loads automatically on each page visit.
+Use the **中文 / English** selector to change interface language without resetting your edits.
+Type Chinese lyrics and press **将歌词填入音符 / Fill notes with lyrics**:
 an empty roll receives one quarter note per character (rests for `SP`), while a roll that already
-has notes gets the words assigned to its notes in order. Then shape the melody directly:
+has notes gets the words assigned to its notes in order. Lyric counts must match the sung
+slots (melismas count once; rests do not count); mismatches are shown before applying, with
+unfilled notes highlighted. No partial lyric replacement is performed. Then shape the melody directly:
 
 - drag a note up or down (or use ↑/↓, Shift for octaves) to change its pitch;
 - drag a note's right edge (or press `[` / `]`) to change its length — lengths snap to the twelve
   supported note values and later notes shift to stay contiguous;
 - double-click a note to edit its lyric: `-` continues the previous word (a melisma), `SP` turns the
   note into a rest, and Chinese text starts a new word;
-- use **+ 音符 Note**, **+ 休止 Rest** and **+ 延音 Melisma** (or `N`, `R`, `M`) to insert events after
+- use **+ 音符 Note**, **+ 休止 Rest** and **+ 一字多音 / Melisma** (or `N`, `R`, `M`) to insert events after
   the selection, the pencil tool to draw notes, the eraser or `Delete` to remove them, `Ctrl+Z` to undo;
 - hover a note's right edge to see every length the model can express, marked along the note: the
   twelve values are powers of two and their dotted forms, so they thin out geometrically as they get
@@ -78,10 +82,11 @@ match the pitched note attacks. ABC accompaniment labels such as `"C"` are ignor
 matching Chinese passage into the lyrics textbox. ABC import is powered by `music21`, which
 implements ABC 1.6 and much, but not all, of ABC 2.1.
 
-The **🎲 随机预设 Random preset** button chooses one of 100 ready-to-use score segments sampled from
+The **换个随机示例 / Random example** button chooses one of 100 ready-to-use score segments sampled from
 the processed CloudTest data and loads its lyrics, complete melisma-aware score and BPM into the
-piano roll. It does not start inference, so every value can be adjusted before pressing **生成歌声
-Generate Singing**. Source song and artist names are not displayed.
+piano roll. The initial example and subsequent random examples do not start inference. The
+**Generate singing** button sits above the roll. **Preview melody** uses a synth tone, the
+reference player plays the source recording, and the result player contains model output. Source song and artist names are not displayed.
 
 Only upload voice recordings that you own or have permission to use.
 

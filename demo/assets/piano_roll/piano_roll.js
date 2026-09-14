@@ -12,6 +12,19 @@
   const root = element.querySelector(".vr-roll");
   if (!root) return;
 
+  const lang = () => props.language === "en" ? "en" : "zh";
+  const t = (zh, en) => lang() === "en" ? en : zh;
+  function localize() {
+    root.querySelectorAll("[data-zh][data-en]").forEach(node => { node.textContent = node.dataset[lang()]; });
+    el.play.textContent = state.playing ? t("⏸ 暂停", "⏸ Pause") : t("▶ 试听旋律", "▶ Preview melody");
+    buildDurationOptions();
+    render();
+  }
+  function highlightLyrics() {
+    const targets = new Set(props.lyric_targets || []);
+    el.notes.querySelectorAll(".vr-note").forEach(note => note.classList.toggle("lyric-missing", targets.has(note.dataset.uid)));
+  }
+
   const ROW_H = 16;
   const TOP_PITCH = 108;
   const BOTTOM_PITCH = 21;
@@ -141,7 +154,7 @@
   }
 
   function setMessage(problem, ok) {
-    state.message = problem ? (problem.zh ? `${problem.zh} ${problem.en}` : String(problem)) : null;
+    state.message = problem ? (problem.zh ? t(problem.zh, problem.en) : String(problem)) : null;
     el.message.textContent = state.message || "";
     el.message.classList.toggle("ok", !!ok);
   }
@@ -238,7 +251,7 @@
       if (active) {
         parts.push(
           // Above the note: the band below it belongs to the next pitch row.
-          `<div class="vr-snap-tip" style="left:${(ev.start + d.ticks) * scale}px;top:${Math.max(0, pitchTop(ev.pitch) - 19)}px">${escapeHtml(d.zh)} ${escapeHtml(d.en)}</div>`,
+          `<div class="vr-snap-tip" style="left:${(ev.start + d.ticks) * scale}px;top:${Math.max(0, pitchTop(ev.pitch) - 19)}px">${escapeHtml(t(d.zh, d.en))}</div>`,
         );
       }
     });
@@ -284,13 +297,14 @@
         cols.push(`<div class="vr-restcol" style="left:${left}px;width:${ev.ticks * scale}px"></div>`);
       } else {
         const d = M.DURATIONS[M.clampDurationIndex(state.rows[ev.index].duration_index)];
-        const title = `${escapeHtml(ev.word)} · ${M.midiName(ev.pitch)} (${ev.pitch}) · ${d.zh} ${d.en}`;
+        const title = `${escapeHtml(ev.word)} · ${M.midiName(ev.pitch)} (${ev.pitch}) · ${t(d.zh, d.en)}`;
         notes.push(
           `<div class="vr-note${ev.isHead ? "" : " continuation"}${sel}" data-index="${ev.index}" data-uid="${escapeHtml(ev.uid)}" style="left:${left}px;top:${pitchTop(ev.pitch)}px;width:${w}px" title="${title}">${escapeHtml(ev.lyric)}<div class="vr-handle" data-index="${ev.index}" style="width:${handleWidth(w)}px"></div></div>`,
         );
       }
     }
     el.notes.innerHTML = notes.join("");
+    highlightLyrics();
     el.rests.innerHTML = rests.join("");
     el.restcols.innerHTML = cols.join("");
     el.end.style.left = `${total * scale}px`;
@@ -333,12 +347,12 @@
 
   function renderFooter() {
     const c = M.counts(state.rows);
-    el.counts.textContent = `事件 Events ${c.events}/${M.MAX_EVENTS} · 字 Words ${c.words}/${M.MAX_WORDS} · 时长 Length ${formatSeconds(M.totalTicks(state.rows))}`;
+    el.counts.textContent = `${t("音符/休止", "Notes/rests")} ${c.events}/${M.MAX_EVENTS} · ${t("歌词单元", "Lyric units")} ${c.words}/${M.MAX_WORDS} · ${formatSeconds(M.totalTicks(state.rows))}`;
     const problems = M.validate(state.rows, state.bpm);
     el.counts.classList.toggle("over", problems.some((p) => p.en.includes("Too many")));
     if (!state.message) {
       const p = problems.find((x) => !x.en.includes("empty"));
-      el.message.textContent = p ? `${p.zh} ${p.en}` : "";
+      el.message.textContent = p ? t(p.zh, p.en) : "";
       el.message.classList.remove("ok");
     }
   }
@@ -785,7 +799,7 @@
     }
     state.playing = { master, t0, from, secPerTick, endTime, raf: 0 };
     el.play.classList.add("playing");
-    el.play.textContent = "⏸ 暂停 Pause";
+    el.play.textContent = t("⏸ 暂停", "⏸ Pause");
     el.playhead.classList.add("active");
     const tick = () => {
       if (!state.playing) return;
@@ -817,7 +831,7 @@
     setTimeout(() => { try { p.master.disconnect(); } catch (err) { /* ignore */ } }, 100);
     state.playing = null;
     el.play.classList.remove("playing");
-    el.play.textContent = "▶ 试听 Play";
+    el.play.textContent = t("▶ 试听旋律", "▶ Preview melody");
     el.playhead.classList.remove("active");
   }
 
@@ -839,8 +853,8 @@
 
   // ------------------------------------------------------------------ wiring
   function buildDurationOptions() {
-    el.duration.innerHTML = M.DURATIONS.map((d, i) => `<option value="${i}">${d.zh} ${d.en} (1/${d.key})</option>`).join("");
-    el.duration.value = String(M.QUARTER_INDEX);
+    el.duration.innerHTML = M.DURATIONS.map((d, i) => `<option value="${i}">${t(d.zh, d.en)}</option>`).join("");
+    el.duration.value = String(firstSelected() >= 0 ? state.rows[firstSelected()].duration_index : M.QUARTER_INDEX);
   }
 
   root.addEventListener("click", (e) => {
@@ -989,6 +1003,9 @@
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => render()).observe(el.gridWrap);
 
   watch("value", () => loadFromProps());
+  watch("language", () => localize());
+  watch("lyric_targets", () => highlightLyrics());
+  localize();
 
   buildKeys();
   buildDurationOptions();

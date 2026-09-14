@@ -3,7 +3,7 @@
   --vr-key-w: 64px;
   --vr-ruler-h: 48px;
   --vr-row-h: 16px;
-  --vr-grid-h: 440px;
+  --vr-grid-h: 280px;
   --vr-border: var(--border-color-primary, #d0d0d0);
   --vr-bg: var(--block-background-fill, #fff);
   --vr-bg2: var(--background-fill-secondary, #f4f4f5);
@@ -164,4 +164,18 @@
 @media (max-width: 700px) {
   .vr-roll { --vr-grid-h: 320px; --vr-key-w: 48px; }
   .vr-hint { display: none; }
+}
+
+.vr-preview-note { padding: 4px 10px; font-size: 12px; color: var(--vr-muted); border-bottom: 1px solid var(--vr-border); }
+.vr-more { position: relative; }
+.vr-more summary { cursor: pointer; padding: 4px 8px; border: 1px solid var(--vr-border); border-radius: 6px; }
+.vr-more-panel { position: absolute; top: 100%; right: 0; z-index: 30; min-width: 260px; padding: 10px; background: var(--vr-bg); border: 1px solid var(--vr-border); border-radius: 6px; box-shadow: 0 4px 12px #0002; }
+.vr-more-panel .vr-group { display: flex; margin: 4px 0; padding: 0; border: 0; }
+.vr-note.lyric-missing { outline: 2px solid #d97706; outline-offset: 1px; }
+@media (max-width: 700px) { .vr-roll { --vr-grid-h: 240px; } .vr-hint { display: none; } }
+
+@media (max-width: 700px) {
+  .vr-transport { flex-wrap: wrap; }
+  .vr-more-panel { right: auto; left: 0; max-width: calc(100vw - 60px); min-width: 220px; }
+  .vr-inspector-title { flex-shrink: 0; }
 }
