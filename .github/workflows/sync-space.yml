@@ -1,0 +1,32 @@
+name: Sync web demo to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "demo/**"
+      - "src/vocalrender/**"
+      - "scripts/sync_space.py"
+      - ".github/workflows/sync-space.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-space
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with LFS reference voices)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "huggingface_hub>=0.30"
+      - name: Upload demo/ + src/vocalrender/ to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/sync_space.py

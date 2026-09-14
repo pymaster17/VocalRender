@@ -52,11 +52,23 @@ viz = [
     "music21>=9.9.1",
     "lilypond>=2.25.12",
 ]
+# Web demo (demo/app.py): Gradio piano-roll UI + ABC / MusicXML score import.
+# The demo needs Python >= 3.11 (music21 10.x); the core package keeps 3.10.
+demo = [
+    "gradio[mcp]==6.15.1",
+    "music21>=10.5,<11; python_version >= '3.11'",
+    "defusedxml>=0.7.1",
+]
 dev = [
     "pytest>=6.0",
     "black>=21.0",
     "flake8>=3.8",
+    # Headless browser checks for the demo (tests in demo/tests/browser).
+    "playwright>=1.62.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "demo/tests"]
 
 [tool.uv]
 # Pin the lockfile to the stack this release was validated against.

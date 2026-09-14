@@ -1,6 +1,6 @@
 .venv/
+.venv-gpu/
 .pytest_cache/
 __pycache__/
 *.py[cod]
-.venv-gpu/
 tests/browser/shots/

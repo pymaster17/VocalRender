@@ -1,7 +1,0 @@
-.git
-.venv
-.pytest_cache
-__pycache__
-logs
-tests/browser/shots
-*.sbatch

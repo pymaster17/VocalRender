@@ -1,7 +1,7 @@
 """GPU smoke test: load the default checkpoint, generate, switch checkpoint, generate again.
 
-Run on a GPU node (not the head node):
-    python tests/gpu_smoke.py [out_dir]
+Run on a GPU node (not the head node), from the repo root:
+    python demo/tests/gpu_smoke.py [out_dir]
 """
 import os
 import sys
@@ -14,7 +14,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app  # noqa: E402  (loads the default checkpoint)
 
-out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "logs/smoke")
+out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "outputs/smoke")
 out_dir.mkdir(parents=True, exist_ok=True)
 
 

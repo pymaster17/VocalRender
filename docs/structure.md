@@ -14,6 +14,7 @@ VocalRender/
 │   ├── infer_vocalrender_svs_single.py # 单样本推理
 │   ├── preprocess_svs_data.py         # SVS 预处理入口
 │   └── setup_svs_tokenizer.py         # SVS token 扩展工具
+│   └── sync_space.py                  # 将 demo/ + src/vocalrender/ 发布到 HF Space
 ├── src/
 │   └── vocalrender/
 │       ├── model/                     # 主模型与 SVS token 工具
@@ -22,7 +23,12 @@ VocalRender/
 │       ├── preprocessing/             # SVS 预处理库
 │       ├── evaluation/                # 推理与评估
 │       ├── inference/                 # 批推理脚本共享的 backend 抽象
-│       └── utils/                     # score rendering 等工具
+│       └── utils/                     # score rendering、ABC/MusicXML 导入等工具
+├── demo/                              # 网页 Demo（Gradio 钢琴卷帘 UI），同步到 HF Space
+│   ├── app.py
+│   ├── assets/piano_roll/             # 钢琴卷帘前端（score_model.js / piano_roll.js）
+│   ├── assets/*.wav                   # 参考音色（Git LFS）
+│   └── tests/                         # 前端单元测试、浏览器与 GPU 冒烟测试
 ├── nanovllm-voxcpm/                   # nano-vllm 推理 backend（git submodule）
 ├── docs/
 └── pyproject.toml

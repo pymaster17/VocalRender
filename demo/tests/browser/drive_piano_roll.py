@@ -1,10 +1,10 @@
 """Headless-browser smoke test for the piano roll.
 
 Run the demo in UI-only mode first:
-    VOCALRENDER_UI_ONLY=1 GRADIO_SERVER_PORT=7871 python app.py
+    VOCALRENDER_UI_ONLY=1 GRADIO_SERVER_PORT=7871 python demo/app.py
 then:
-    python tests/browser/drive_piano_roll.py
-Requires the dev group (playwright) and `playwright install chromium`.
+    python demo/tests/browser/drive_piano_roll.py
+Requires the dev extra (playwright) and `playwright install chromium`.
 """
 
 import os
@@ -12,7 +12,8 @@ import os
 from playwright.sync_api import sync_playwright
 
 URL = "http://127.0.0.1:7871/"
-os.makedirs("tests/browser/shots", exist_ok=True)
+SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
+os.makedirs(SHOTS, exist_ok=True)
 out = []
 with sync_playwright() as p:
     browser = p.chromium.launch()
@@ -23,7 +24,7 @@ with sync_playwright() as p:
     page.goto(URL)
     page.wait_for_selector(".vr-roll", timeout=30000)
     page.wait_for_timeout(500)
-    page.screenshot(path="tests/browser/shots/01_empty.png")
+    page.screenshot(path=SHOTS + "/01_empty.png")
     out.append(("empty counts", page.text_content(".vr-counts")))
 
     page.get_by_role("button", name="随机预设").click()
@@ -32,7 +33,7 @@ with sync_playwright() as p:
     out.append(("preset notes/rests", (page.locator(".vr-note").count(), page.locator(".vr-rest").count())))
     out.append(("preset counts", page.text_content(".vr-counts")))
     out.append(("lyrics", page.locator("#vr-lyrics-row textarea, #vr-lyrics-row input").first.input_value()))
-    page.screenshot(path="tests/browser/shots/02_preset.png")
+    page.screenshot(path=SHOTS + "/02_preset.png")
 
     first = page.locator(".vr-note").first
     first.click()
@@ -94,7 +95,7 @@ with sync_playwright() as p:
     page.wait_for_timeout(100)
     out.append(("after pencil notes", page.locator(".vr-note").count()))
     out.append(("pencil lyric", page.locator(".vr-note.selected").text_content()))
-    page.screenshot(path="tests/browser/shots/03_edited.png")
+    page.screenshot(path=SHOTS + "/03_edited.png")
 
     page.locator(".vr-bpm").fill("90")
     page.locator(".vr-bpm").press("Enter")
@@ -104,7 +105,7 @@ with sync_playwright() as p:
     page.wait_for_timeout(3000)
     out.append(("status", page.locator("#vr-generate").locator("xpath=..").text_content().strip()[:200]))
     out.append(("debug prompt", page.get_by_label("Generated SVS prompt (debug)").input_value()[:220]))
-    page.screenshot(path="tests/browser/shots/04_generated.png", full_page=True)
+    page.screenshot(path=SHOTS + "/04_generated.png", full_page=True)
 
     page.locator("#vr-lyrics-row textarea, #vr-lyrics-row input").first.fill("我爱唱歌你好世界")
     page.get_by_role("button", name="应用歌词").click()

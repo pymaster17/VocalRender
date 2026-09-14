@@ -21,8 +21,9 @@ with sync_playwright() as p:
         timeout=300000,
     )
     status = page.locator("#vr-generate").locator("xpath=..").text_content().strip()
-    os.makedirs("tests/browser/shots", exist_ok=True)
-    page.screenshot(path="tests/browser/shots/gpu_generate.png", full_page=True)
+    shots = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
+    os.makedirs(shots, exist_ok=True)
+    page.screenshot(path=os.path.join(shots, "gpu_generate.png"), full_page=True)
     print("counts:", counts)
     print("status:", status)
     print("pageerrors:", [e for e in errors if "aborted" not in e])

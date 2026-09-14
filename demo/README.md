@@ -87,32 +87,37 @@ The music-notation icons use Steinberg's professional
 
 ## Deployment
 
-The same `app.py` runs on a Hugging Face ZeroGPU Space and on your own GPU server.
+This demo lives in the [`demo/`](https://github.com/pymaster17/VocalRender/tree/main/demo) directory
+of the main [VocalRender](https://github.com/pymaster17/VocalRender) repository; the Hugging Face
+Space is a build product published from there. The same `app.py` runs on a ZeroGPU Space and on
+your own GPU server.
 
-**Hugging Face Space** — push this repository to a Space with `sdk: gradio` (the YAML header at the
-top of this file configures it). The `spaces` package is provided by the platform, `@spaces.GPU`
-schedules the generation on ZeroGPU, and checkpoints are fetched from `pymaster/VocalRender`.
+**Hugging Face Space** — `scripts/sync_space.py` (run by the `sync-space` GitHub workflow on every
+push to `main`, or by hand with an `HF_TOKEN`) copies `demo/` and `src/vocalrender/` to the Space.
+The YAML header at the top of this file configures the Space; the `spaces` package is provided by
+the platform, `@spaces.GPU` schedules generation on ZeroGPU, and checkpoints are fetched from
+`pymaster/VocalRender`.
 
 **Self-hosted server** — `spaces` is not required; when it is missing the decorator becomes a
-no-op and generation runs on the local GPU directly.
+no-op and generation runs on the local GPU directly. Python 3.11+.
 
 ```bash
-git clone <this repo> && cd VocalRender-demo
+git clone https://github.com/pymaster17/VocalRender.git && cd VocalRender
 python -m venv .venv && source .venv/bin/activate
 # Install torch first, matching your NVIDIA driver (see https://pytorch.org/get-started/locally/);
 # an unpinned `pip install torch` may pick a build that needs a newer driver than you have.
 pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements.txt
-GRADIO_SERVER_NAME=0.0.0.0 GRADIO_SERVER_PORT=7860 python app.py
+pip install -e ".[demo]"
+GRADIO_SERVER_NAME=0.0.0.0 GRADIO_SERVER_PORT=7860 python demo/app.py
 ```
 
 Startup loads the default checkpoint (~5 GB of GPU memory, ~30 s); switching checkpoints in the UI
 takes ~20 s. A 15-event phrase renders in 4–8 s on an RTX 6000 Ada.
 
-Or with Docker (single GPU, weights cached in the mounted HF cache):
+Or with Docker (single GPU, weights cached in the mounted HF cache; build from the repo root):
 
 ```bash
-docker build -t vocalrender-demo .
+docker build -f demo/Dockerfile -t vocalrender-demo .
 docker run --gpus all -p 7860:7860 -v $HOME/.cache/huggingface:/root/.cache/huggingface vocalrender-demo
 ```
 
@@ -137,18 +142,21 @@ The piano roll is a single `gr.HTML` component: `assets/piano_roll/piano_roll.ht
 `piano_roll.css` (scoped styles), `score_model.js` (pure score logic, no DOM) and `piano_roll.js`
 (interaction, WebAudio preview). Its value is `{"rows": [...], "bpm": int, "beats_per_bar": int}`,
 where `rows` is the same `word / word_index / uid / pitch / duration_index` list produced by the
-presets and the score importer, so the backend is unchanged.
+presets and the score importer (`vocalrender.utils.score_import`), so the backend is unchanged.
+
+All commands run from the repository root:
 
 ```bash
-uv sync --group dev                      # gradio, pytest, playwright
-node --test tests/test_score_model.mjs   # score-model unit tests
-uv run pytest                            # importer + editor value helpers
-VOCALRENDER_UI_ONLY=1 uv run python app.py   # run the UI without models or a GPU
-uv run playwright install chromium && uv run python tests/browser/drive_piano_roll.py
-python tests/gpu_smoke.py                    # on a GPU machine: load, generate, switch checkpoint, generate
+uv sync --extra demo --extra dev                    # gradio, music21, pytest, playwright
+node --test demo/tests/test_score_model.mjs         # score-model unit tests
+uv run pytest                                       # importer (tests/) + editor value helpers (demo/tests/)
+VOCALRENDER_UI_ONLY=1 uv run python demo/app.py     # run the UI without models or a GPU
+uv run playwright install chromium && uv run python demo/tests/browser/drive_piano_roll.py
+uv run python demo/tests/gpu_smoke.py               # on a GPU machine: load, generate, switch checkpoint, generate
+python scripts/sync_space.py --dry-run              # list what would be published to the Space
 ```
 
-`tests/smoke_job.sbatch` runs the GPU smoke test plus a browser-driven generation on a Slurm node.
+`demo/tests/smoke_job.sbatch` runs the GPU smoke test plus a browser-driven generation on a Slurm node.
 
 `VOCALRENDER_UI_ONLY=1` skips the checkpoint download and makes **Generate** return the selected
 reference clip, so the whole editing flow can be exercised locally.

@@ -1,20 +1,12 @@
 """Tests for the piano-roll value helpers in app.py (UI-only mode, no models)."""
 import importlib
-import os
-import sys
-from pathlib import Path
-
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
 def app():
-    os.environ["VOCALRENDER_UI_ONLY"] = "1"
-    sys.path.insert(0, str(ROOT))
-    module = importlib.import_module("app")
-    return module
+    # conftest.py sets VOCALRENDER_UI_ONLY=1 and puts demo/ on sys.path.
+    return importlib.import_module("app")
 
 
 def _row(word, word_index, pitch, duration_index, uid=None):

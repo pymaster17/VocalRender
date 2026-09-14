@@ -120,6 +120,20 @@ hf download pymaster/VocalRender \
 
 Each checkpoint download is about 9.5 GB.
 
+## Web demo (piano roll)
+
+The [online inference demo](https://huggingface.co/spaces/pymaster/VocalRender-demo) is
+maintained in [`demo/`](demo/): a Gradio app with a piano-roll score editor, ABC / MusicXML
+import, reference-voice selection and a checkpoint switch. The Space is published from this
+repository (`scripts/sync_space.py`); the same app runs on your own GPU server:
+
+```bash
+pip install -e ".[demo]"          # Python >= 3.11; install torch for your driver first
+python demo/app.py                # http://127.0.0.1:7860
+```
+
+See [demo/README.md](demo/README.md) for the Docker image, environment variables and tests.
+
 ## Batch inference
 
 Batch inference runs over a preprocessed validation set and writes generated
@@ -255,6 +269,7 @@ Aesthetics) and sample audio to TensorBoard.
 conf/               Training / inference / preprocessing YAML configs
 scripts/            Entry-point scripts (preprocess, train, infer)
 src/vocalrender/    The package (model, training, inference, evaluation)
+demo/               Web demo (Gradio piano-roll UI), published to the HF Space
 nanovllm-voxcpm/    Optional nano-vllm inference backend (git submodule)
 docs/               Architecture and usage documentation
 ```

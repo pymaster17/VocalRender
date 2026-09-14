@@ -32,6 +32,13 @@ runs/
 # Prompt audio used by the reproducible single-inference examples.
 !examples/prompt_audio/*.wav
 
+# Reference voices for the web demo (Git LFS, see demo/.gitattributes).
+!demo/assets/*.wav
+
+# Web demo scratch
+demo/.venv-gpu/
+demo/tests/browser/shots/
+
 # Editor / OS
 .idea/
 .vscode/

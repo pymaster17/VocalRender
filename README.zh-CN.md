@@ -105,6 +105,20 @@ hf download pymaster/VocalRender \
 
 每个 checkpoint 约需下载 9.5 GB。
 
+## 网页 Demo(钢琴卷帘)
+
+[在线推理 Demo](https://huggingface.co/spaces/pymaster/VocalRender-demo) 的代码维护在
+[`demo/`](demo/) 目录:一个带钢琴卷帘乐谱编辑器、ABC / MusicXML 导入、参考音色选择和
+checkpoint 切换的 Gradio 应用。Space 由本仓库发布(`scripts/sync_space.py`),同一个应用也可以
+部署在自己的 GPU 服务器上:
+
+```bash
+pip install -e ".[demo]"          # 需要 Python >= 3.11;请先按显卡驱动安装 torch
+python demo/app.py                # http://127.0.0.1:7860
+```
+
+Docker 镜像、环境变量和测试见 [demo/README.md](demo/README.md)。
+
 ## 批量推理
 
 批量推理在预处理好的验证集上运行,输出生成的 WAV、可选乐谱 PNG 以及
@@ -233,6 +247,7 @@ TensorBoard。
 conf/               训练 / 推理 / 预处理的 YAML 配置
 scripts/            入口脚本(预处理、训练、推理)
 src/vocalrender/    核心包(模型、训练、推理、评测)
+demo/               网页 Demo(Gradio 钢琴卷帘界面),发布到 HF Space
 nanovllm-voxcpm/    可选的 nano-vllm 推理后端(git 子模块)
 docs/               架构与使用文档
 ```

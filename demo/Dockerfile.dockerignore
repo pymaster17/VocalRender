@@ -1,0 +1,13 @@
+.git
+**/.venv
+**/.venv-gpu
+**/__pycache__
+**/.pytest_cache
+demo/tests/browser/shots
+*.sbatch
+pretrained_models
+outputs
+logs
+assets
+docs
+nanovllm-voxcpm

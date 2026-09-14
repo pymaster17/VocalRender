@@ -48,8 +48,13 @@ if not UI_ONLY:
     import torchaudio
     from einops import rearrange
 
-# Add the bundled src directory to the path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Locate the vocalrender package when it is not pip-installed:
+#   demo/app.py inside the GitHub repo  -> ../src
+#   app.py at the root of the HF Space -> ./src (copied there by scripts/sync_space.py)
+for _src in (Path(__file__).resolve().parent.parent / "src", Path(__file__).resolve().parent / "src"):
+    if (_src / "vocalrender").is_dir():
+        sys.path.insert(0, str(_src))
+        break
 
 from vocalrender.utils.score_import import (
     ScoreImportError,
@@ -472,12 +477,12 @@ NOTE_TO_DURATION_INDEX = {
 }
 
 VOICE_PRESETS = {
-    "Alto-1": "assets/alto-1.wav",
-    "Alto-2": "assets/alto-2.wav",
-    "Alto-3": "assets/alto-3.wav",
-    "Tenor-1": "assets/tenor-1.wav",
-    "Tenor-2": "assets/tenor-2.wav",
-    "Tenor-3": "assets/tenor-3.wav",
+    "Alto-1": str(ASSETS_DIR / "alto-1.wav"),
+    "Alto-2": str(ASSETS_DIR / "alto-2.wav"),
+    "Alto-3": str(ASSETS_DIR / "alto-3.wav"),
+    "Tenor-1": str(ASSETS_DIR / "tenor-1.wav"),
+    "Tenor-2": str(ASSETS_DIR / "tenor-2.wav"),
+    "Tenor-3": str(ASSETS_DIR / "tenor-3.wav"),
     "Upload my own voice": None,
 }
 UPLOAD_VOICE = "Upload my own voice"
