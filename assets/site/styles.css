@@ -51,7 +51,7 @@ button, input { color: inherit; font: inherit; }
 .paper-subtitle { max-width: 580px; margin: 17px 0 0; color: var(--green); font: 400 clamp(21px, 2.3vw, 30px)/1.25 var(--serif); }
 .paper-description { align-self: end; }
 .paper-description > p { max-width: 540px; margin: 0; color: #4f5b55; font-size: 13px; line-height: 1.8; }
-.paper-actions { display: flex; gap: 13px; margin-top: 25px; }
+.paper-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 25px; }
 .paper-actions a { display: inline-flex; align-items: center; gap: 12px; padding: 10px 14px; font: 500 9px var(--mono); text-transform: uppercase; transition: transform .2s; }
 .paper-actions a:hover { transform: translateY(-2px); }
 .primary-link { color: #fff; background: var(--green); }

@@ -109,6 +109,10 @@ VocalRender/
   embedding 初始化逻辑）。
 - `vae_loader.py` — AudioVAE 懒加载（验证时按需上 GPU）。
 
+`training/__init__.py` 通过 PEP 562 `__getattr__` 惰性解析 `Accelerator`、
+`SVSTrainConfig` 等再导出名：推理路径（预处理里的 `svs_data` 音节工具、网页
+Demo）导入子模块时不会连带加载 argbind / 分布式训练栈。
+
 ### 2.4 预处理层 (`src/vocalrender/preprocessing/`)
 
 - `svs_preprocessor.py` — `SVSPreprocessor`：VAE 编码与 token 序列构建。
@@ -127,6 +131,9 @@ VocalRender/
 - `metrics.py` — SingMOS / AES 指标实现。
 - `visualization.py` — 乐谱条件可视化（TensorBoard 图）。
 - `audio_utils.py` — 音频归一化、参考音频解码与批量 latent 解码原语。
+
+与训练层相同，`evaluation/__init__.py` 惰性导出：只用 `audio_utils` 的调用方
+（如网页 Demo）不会触发 s3prl / matplotlib 等指标依赖的导入。
 
 ### 2.6 推理 backend 层 (`src/vocalrender/inference/`)
 
@@ -149,6 +156,31 @@ VocalRender/
 
 - `score_rendering.py` — 乐谱渲染工具（音符序列 → 五线谱 PNG，依赖
   可选 extra `[viz]`：music21 + lilypond）。
+- `score_import.py` — ABC / MusicXML（`.musicxml` / `.xml` / `.mxl`）乐谱导入：
+  解析 → 选择声部与小节区间 → 转成 `word / pitch / duration_index` 事件行
+  （连音线合并为 melisma，休止符记作 `SP`）。依赖 extra `[demo]`（music21 +
+  defusedxml）。测试见 `tests/test_score_import.py`。
+
+### 2.8 网页 Demo 层 (`demo/`)
+
+Gradio 应用，也是 HF Space `pymaster/VocalRender-demo` 的唯一代码来源。
+
+- `app.py` — 页面布局与事件绑定；`_ModelCache` 单驻留模型缓存（切换
+  checkpoint 时先释放旧模型再加载）；`@spaces.GPU` 在 ZeroGPU 上调度生成，
+  自部署时 `spaces` 缺失则退化为空装饰器；`VOCALRENDER_UI_ONLY=1` 跳过模型
+  加载以便无 GPU 开发。乐谱的单一数据源是
+  `{"rows": [...], "bpm": int, "beats_per_bar": int}`，`rows` 与预设 / 导入器
+  产出的 `word / word_index / uid / pitch / duration_index` 行完全一致。
+- `assets/piano_roll/` — 钢琴卷帘前端：`score_model.js`（纯乐谱逻辑，无 DOM，
+  `node --test` 可测）、`piano_roll.js`（交互、撤销重做、WebAudio 试听）、
+  `piano_roll.html` / `.css`（`gr.HTML` 模板）。
+- `assets/*.wav`、`assets/fonts/Bravura.woff2` — 参考音色与乐谱字体（Git LFS）。
+- `requirements.txt` — Space 侧安装清单；仓库内安装用 `pip install -e ".[demo]"`。
+- `tests/` — 值转换单测、Playwright 浏览器驱动、`gpu_smoke.py` + Slurm 脚本。
+
+发布链：`scripts/sync_space.py` 把 `demo/` 与 `src/vocalrender/` 拼成 Space 目录
+并 `upload_folder` 镜像推送；`.github/workflows/sync-space.yml` 在 `main` 的相关
+路径变更时自动执行（需要仓库 secret `HF_TOKEN`）。
 
 ## 3. 数据流
 
@@ -191,4 +223,16 @@ SVS 输入 (乐谱标注 + 必需的 prompt 音频)
        │
        ▼
   evaluation/svs_metrics.py  →  SingMOS / AES 指标
+```
+
+网页 Demo 的路径更短，不经过 backend 抽象与指标：
+
+```text
+钢琴卷帘 rows + bpm (或 ABC / MusicXML → utils/score_import.py)
+       │
+       ▼
+  demo/app.py
+  ├─ preprocessing.rebuild_svs_prompt → prompt token 序列
+  ├─ 模型自回归生成（单驻留 checkpoint）
+  └─ AudioVAE 解码 → 48 kHz 波形 → 浏览器播放
 ```
