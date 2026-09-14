@@ -36,6 +36,7 @@ runs/
 !demo/assets/*.wav
 
 # Web demo scratch
+.venv-demo/
 demo/.venv-gpu/
 demo/tests/browser/shots/
 

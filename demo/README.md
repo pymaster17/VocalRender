@@ -147,7 +147,7 @@ presets and the score importer (`vocalrender.utils.score_import`), so the backen
 All commands run from the repository root:
 
 ```bash
-uv sync --extra demo --extra dev                    # gradio, music21, pytest, playwright
+uv sync --python 3.11 --extra demo --extra dev      # gradio, music21, pytest, playwright (Python >= 3.11)
 node --test demo/tests/test_score_model.mjs         # score-model unit tests
 uv run pytest                                       # importer (tests/) + editor value helpers (demo/tests/)
 VOCALRENDER_UI_ONLY=1 uv run python demo/app.py     # run the UI without models or a GPU

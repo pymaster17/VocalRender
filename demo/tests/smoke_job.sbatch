@@ -23,9 +23,11 @@ mkdir -p "$TMPDIR" "$GRADIO_TEMP_DIR" "$TORCHINDUCTOR_CACHE_DIR" outputs/smoke
 echo "node=$(hostname) gpus=${SLURM_GPUS_ON_NODE:-?} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset} repo=$PWD"
 df -h /tmp | tail -1
 
-# uv.lock pins torch 2.10.0, which matches the cluster's CUDA 12.8 driver.
-uv sync --extra demo --extra dev
-PY=.venv/bin/python
+# uv.lock pins torch 2.10.0, which matches the cluster's CUDA 12.8 driver. The demo
+# needs Python >= 3.11, so use a separate environment and leave the project's .venv alone.
+export UV_PROJECT_ENVIRONMENT=.venv-demo
+uv sync --python 3.11 --extra demo --extra dev
+PY=$UV_PROJECT_ENVIRONMENT/bin/python
 $PY -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 $PY -m playwright install chromium
 
