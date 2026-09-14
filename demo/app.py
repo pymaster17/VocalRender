@@ -860,6 +860,10 @@ GUIDE_MD = """
    Enter Chinese lyrics and press **Apply lyrics**: an empty roll gets one quarter note per character; otherwise the words are assigned to existing notes in order.
 3. **旋律 Melody** — 在钢琴卷帘中拖动音符改音高，拖右缘改时值，双击改歌词（`-` 延音，`SP` 休止），铅笔工具点击添加音符。
    Drag notes for pitch, drag the right edge for length, double-click to edit the lyric (`-` continues the previous word, `SP` makes a rest), use the pencil to add notes.
+   > **关于时值 · About note lengths** — 模型读的是乐谱符号，不是毫秒，它的时值词汇只有十二个：全音符到三十二分音符，以及各自的附点（×1.5）形式。
+   > 因为这十二个值成倍数排列，越长的音符之间间隔越大——拖右缘时把鼠标停在手柄上，卷帘会标出全部合法长度，这不是吸附精度下降。
+   > The model reads score symbols, not milliseconds: its whole vocabulary is twelve lengths — whole down to thirty-second, plus the dotted (x1.5) form of each.
+   > They are spaced geometrically, so the gaps widen as notes get longer. Hover the right edge of a note and the roll marks every legal length; the coarseness is the alphabet, not loose snapping.
 4. **试听 Preview** — 按 ▶ 用合成音色试听旋律（不占用 GPU）。Press ▶ to audition the melody with a synth tone (no GPU).
 5. **生成 Generate** — 设置速度后按 **生成歌声**。Set the tempo and press **Generate Singing**. The first run may wait in a shared GPU queue.
 

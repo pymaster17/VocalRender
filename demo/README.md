@@ -42,6 +42,9 @@ has notes gets the words assigned to its notes in order. Then shape the melody d
   note into a rest, and Chinese text starts a new word;
 - use **+ 音符 Note**, **+ 休止 Rest** and **+ 延音 Melisma** (or `N`, `R`, `M`) to insert events after
   the selection, the pencil tool to draw notes, the eraser or `Delete` to remove them, `Ctrl+Z` to undo;
+- hover a note's right edge to see every length the model can express, marked along the note: the
+  twelve values are powers of two and their dotted forms, so they thin out geometrically as they get
+  longer — the coarseness further out is the score alphabet, not loose snapping;
 - click or drag the bar-number strip to place the playhead, then press ▶ (`Space`) to audition the
   melody with a synthesised tone before using the GPU. `Space` again pauses where the playhead is and
   the next `Space` resumes from there; ■ (`Esc`) stops and rewinds, `Home`/`End` jump to either end.

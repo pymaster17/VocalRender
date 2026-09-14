@@ -47,6 +47,7 @@
     grid: root.querySelector(".vr-grid"),
     restcols: root.querySelector(".vr-restcols"),
     notes: root.querySelector(".vr-notes"),
+    snaps: root.querySelector(".vr-snaps"),
     playhead: root.querySelector(".vr-playhead"),
     end: root.querySelector(".vr-end"),
     counts: root.querySelector(".vr-counts"),
@@ -200,6 +201,43 @@
   }
 
   const handleWidth = (w) => (w >= 24 ? 7 : Math.max(2, Math.floor(w / 3)));
+
+  /* The twelve legal lengths are 2^n quarters and their dotted (x1.5) forms,
+   * so they thin out geometrically: near the note head they are a few pixels
+   * apart, a whole note away they are half a bar apart. Resizing therefore
+   * feels like the resolution degrades as you drag, which looks like a bug
+   * unless you can see where the model's vocabulary actually lies. Draw every
+   * legal end position on the handle, so the spacing reads as the score
+   * alphabet it is rather than as sloppy snapping. */
+  function showSnapMarks(index) {
+    const ev = M.layout(state.rows)[index];
+    if (!ev || ev.isRest === undefined) return;
+    const scale = ppt();
+    const top = pitchTop(ev.pitch) + ROW_H + 3;
+    const parts = [
+      `<div class="vr-snap-rail" style="left:${ev.start * scale}px;top:${top + 5}px;width:${M.DURATIONS[0].ticks * scale}px"></div>`,
+    ];
+    M.DURATIONS.forEach((d, i) => {
+      const active = i === M.clampDurationIndex(state.rows[index].duration_index);
+      parts.push(
+        `<div class="vr-snap${d.key.endsWith(".") ? " dotted" : ""}${active ? " active" : ""}" data-i="${i}" style="left:${(ev.start + d.ticks) * scale}px;top:${top}px;height:${active ? 16 : 11}px"></div>`,
+      );
+      if (active) {
+        parts.push(
+          // Above the note: the band below it belongs to the next pitch row.
+          `<div class="vr-snap-tip" style="left:${(ev.start + d.ticks) * scale}px;top:${Math.max(0, pitchTop(ev.pitch) - 19)}px">${escapeHtml(d.zh)} ${escapeHtml(d.en)}</div>`,
+        );
+      }
+    });
+    el.snaps.innerHTML = parts.join("");
+    el.snaps.classList.add("on");
+  }
+
+  function hideSnapMarks() {
+    if (state.drag && state.drag.kind === "resize") return;
+    el.snaps.classList.remove("on");
+    el.snaps.innerHTML = "";
+  }
 
   function render() {
     root.classList.toggle("vr-dark", isDark());
@@ -582,6 +620,7 @@
   function startResize(index, e) {
     const ev = M.layout(state.rows)[index];
     state.drag = { kind: "resize", index, startTick: ev.start, base: state.rows, current: state.rows[index].duration_index };
+    showSnapMarks(index);
     attachDragListeners();
   }
 
@@ -608,6 +647,7 @@
       d.current = index;
       state.rows = M.setDuration(d.base, d.index, index);
       render();
+      showSnapMarks(d.index);
     }
   }
 
@@ -615,6 +655,7 @@
     window.removeEventListener("pointermove", onPointerMove);
     const d = state.drag;
     state.drag = null;
+    hideSnapMarks();
     if (!d) return;
     const changed = JSON.stringify(state.rows) !== JSON.stringify(d.base);
     const edited = state.rows;
@@ -916,6 +957,14 @@
     el.hover.style.left = `${rulerTick(e, e.altKey) * ppt()}px`;
   });
   el.bars.addEventListener("pointerleave", () => el.hover.classList.remove("on"));
+
+  el.notes.addEventListener("pointerover", (e) => {
+    const handle = e.target.closest(".vr-handle");
+    if (handle && state.tool === "select") showSnapMarks(Number(handle.dataset.index));
+  });
+  el.notes.addEventListener("pointerout", (e) => {
+    if (e.target.closest(".vr-handle")) hideSnapMarks();
+  });
 
   root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("keydown", onKeyDown);
