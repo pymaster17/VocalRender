@@ -23,7 +23,20 @@
   const SUB_GRID_TICKS = M.TICKS_PER_QUARTER / 4;
   const TAIL_TICKS = 8 * M.TICKS_PER_QUARTER;
   const BLACK = new Set([1, 3, 6, 8, 10]);
-  const GLYPHS = { 1: "𝅝", 2: "𝅗𝅥", 4: "𝅘𝅥", 8: "𝅘𝅥𝅮", 16: "𝅘𝅥𝅯", 32: "𝅘𝅥𝅰" };
+  /* SMuFL "Metronome marks" (U+ECA0..), not the Unicode Musical Symbols block.
+   * Both exist in Bravura, but the Unicode ones are the staff glyphs: their
+   * stems run 0.875em above the baseline, meant to be placed against a staff.
+   * The metronome cuts are the same notes drawn for running text -- 0.69em
+   * above the baseline -- and metAugmentationDot is the dot that matches them. */
+  const GLYPHS = {
+    1: "\uECA2",   // metNoteWhole
+    2: "\uECA3",   // metNoteHalfUp
+    4: "\uECA5",   // metNoteQuarterUp
+    8: "\uECA7",   // metNote8thUp
+    16: "\uECA9",  // metNote16thUp
+    32: "\uECAB",  // metNote32ndUp
+  };
+  const AUGMENTATION_DOT = "\uECB7";
 
   const el = {
     toolbar: root.querySelector(".vr-toolbar"),
@@ -315,7 +328,7 @@
     el.duration.value = String(row.duration_index);
     const d = M.DURATIONS[M.clampDurationIndex(row.duration_index)];
     const denominator = Number(d.key.replace(".", ""));
-    el.glyph.textContent = GLYPHS[denominator] + (d.key.endsWith(".") ? "\uE1E7" : "");
+    el.glyph.textContent = GLYPHS[denominator] + (d.key.endsWith(".") ? AUGMENTATION_DOT : "");
   }
 
   function renderFooter() {

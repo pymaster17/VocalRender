@@ -444,7 +444,16 @@ CSS = """
 }
 .gradio-container { max-width: 1480px !important; margin: 0 auto; }
 .dark .gradio-container { color: var(--body-text-color); }
-.bravura-note { display: inline-flex; align-items: center; font-family: "BravuraVocalRender"; line-height: 1; }
+/* Bravura reserves 2.012em above and below the baseline for ledger lines, so a
+   line box puts the baseline at its exact centre whatever the line-height. The
+   metronome note glyphs span -0.141em..+0.688em around it, which is 0.27em top
+   heavy, so translate by that to centre the ink rather than the baseline. The
+   dot carries no side bearing; letter-spacing supplies the gap. */
+.bravura-note {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: "BravuraVocalRender"; line-height: 1; letter-spacing: .06em;
+  transform: translateY(.27em);
+}
 #vr-header h1 { margin-bottom: .1rem; }
 #vr-header p { margin: 0; }
 #vr-sidebar { min-width: 260px; }
