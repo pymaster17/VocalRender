@@ -9,6 +9,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "gradio==6.15.1",
+    "playwright>=1.62.0",
     "pytest>=9.1.1",
 ]
 
